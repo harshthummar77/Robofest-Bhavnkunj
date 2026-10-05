@@ -150,6 +150,17 @@ So:
 | `npm run dev` / `npm run preview` on the rover network | works | works |
 | `dist/` served over plain HTTP on the rover network | works | works |
 
+For an actual mission run the production build, not the dev server:
+
+```bash
+npm run build
+npm run preview     # http://<this-machine-ip>:4173
+```
+
+Both `dev` and `preview` bind every interface, so the dashboard also opens from
+a second laptop or a phone on the same network — useful when the pilot holds
+the FS-i6 and someone else watches the feed.
+
 A hosted build is therefore the right home for demos, presentations and sharing
 the interface. **For driving an actual mission, serve it on the rover network**
 — that also removes the dependency on having internet underground.
