@@ -314,11 +314,21 @@ function NodeRow({
 }) {
   const health = useSourceHealthList().find((entry) => entry.id === node.id);
   const state: SourceState = health?.state ?? "OFFLINE";
+  // A stream-only node publishes no JSON, so it has no connection state: the
+  // camera element on the view that plays it reports its own health. Showing
+  // it as offline here would be a fault that is not one.
+  const streamOnly = node.transport === "none";
 
   return (
     <div className="rounded-card border border-border bg-surface-raised p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className={cn("size-2 shrink-0 rounded-full", STATE_DOT[state])} title={state} />
+        <span
+          className={cn(
+            "size-2 shrink-0 rounded-full",
+            streamOnly ? "bg-unknown" : STATE_DOT[state],
+          )}
+          title={streamOnly ? "Stream only — no telemetry channel" : state}
+        />
         <input
           value={node.label}
           onChange={(event) => onChange({ label: event.target.value })}
@@ -358,8 +368,9 @@ function NodeRow({
         />
         <Field
           label="Telemetry path"
-          value={node.telemetryPath}
-          placeholder="/api/sensors"
+          value={streamOnly ? "" : node.telemetryPath}
+          placeholder={streamOnly ? "not used" : "/api/sensors"}
+          disabled={streamOnly}
           onChange={(value) => onChange({ telemetryPath: value })}
         />
         <div className="flex flex-col gap-1">
@@ -385,8 +396,9 @@ function NodeRow({
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field
           label="Expected interval (ms)"
-          value={String(node.expectedIntervalMs)}
-          placeholder="1000"
+          value={streamOnly ? "" : String(node.expectedIntervalMs)}
+          placeholder={streamOnly ? "not used" : "1000"}
+          disabled={streamOnly}
           onChange={(value) => {
             const parsed = Number(value);
             onChange({ expectedIntervalMs: Number.isFinite(parsed) ? parsed : 1000 });
@@ -468,8 +480,9 @@ function NodeRow({
 
       <p className="mt-2 truncate font-mono text-[11px] text-faint-foreground">
         {node.baseUrl || "http://…"}
-        {node.telemetryPath}
-        {health?.lastError ? ` · ${health.lastError}` : ""}
+        {streamOnly ? (node.cameraPath ?? "") : node.telemetryPath}
+        {streamOnly && node.cameraKind === "whep" ? "/whep" : ""}
+        {!streamOnly && health?.lastError ? ` · ${health.lastError}` : ""}
       </p>
 
       {mixedContentBlocked(node.baseUrl) ? (
@@ -487,12 +500,14 @@ function Field({
   placeholder,
   onChange,
   wide = false,
+  disabled = false,
 }: {
   label: string;
   value: string;
   placeholder?: string;
   onChange(value: string): void;
   wide?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <div className={cn("flex flex-col gap-1", wide && "lg:col-span-2")}>
@@ -501,8 +516,9 @@ function Field({
         value={value}
         placeholder={placeholder}
         spellCheck={false}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 rounded-md border border-border bg-background px-2.5 text-sm text-foreground placeholder:text-faint-foreground focus:border-primary/60 focus:outline-none"
+        className="h-9 rounded-md border border-border bg-background px-2.5 text-sm text-foreground placeholder:text-faint-foreground focus:border-primary/60 focus:outline-none disabled:cursor-not-allowed disabled:opacity-45"
       />
     </div>
   );
@@ -532,14 +548,22 @@ function LiveDataPanel() {
       />
 
       <div className="space-y-3">
-        {health.map((node) => (
+        {health.map((node) => {
+          const streamOnly = node.transport === "none";
+          return (
           <div key={node.id} className="rounded-card border border-border bg-surface-raised p-4">
             <div className="flex flex-wrap items-center gap-2">
               <IconNode size={16} weight="duotone" className="text-muted-foreground" />
               <span className="text-sm font-medium text-foreground">{node.label}</span>
-              <SourceStateBadge state={node.state} className="ml-auto" />
+              {streamOnly ? (
+                <span className="ml-auto rounded-full bg-unknown-soft px-2.5 py-1 text-[11px] text-unknown">
+                  Stream only
+                </span>
+              ) : (
+                <SourceStateBadge state={node.state} className="ml-auto" />
+              )}
               <span className="text-[11px] text-faint-foreground">
-                {formatAge(node.lastUpdateAt)}
+                {streamOnly ? "camera only" : formatAge(node.lastUpdateAt)}
               </span>
             </div>
 
@@ -556,9 +580,11 @@ function LiveDataPanel() {
               </div>
             ) : (
               <p className="mt-3 text-xs text-muted-foreground">
-                {node.lastError
-                  ? `Nothing recognised yet — ${node.lastError}`
-                  : "No payload received yet."}
+                {streamOnly
+                  ? "Serves a camera stream, not telemetry. Its health is reported on the view that plays it."
+                  : node.lastError
+                    ? `Nothing recognised yet — ${node.lastError}`
+                    : "No payload received yet."}
               </p>
             )}
 
@@ -577,7 +603,8 @@ function LiveDataPanel() {
               </div>
             ) : null}
           </div>
-        ))}
+          );
+        })}
 
         {health.length === 0 ? (
           <p className="rounded-card border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
