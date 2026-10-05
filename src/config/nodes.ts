@@ -227,6 +227,22 @@ export function nodeSocketUrl(node: NodeConfig): string {
   return nodeUrl(node, node.telemetryPath || "/ws").replace(/^http/, "ws");
 }
 
+/**
+ * Whether the browser will refuse to talk to this address.
+ *
+ * PROJECT_CONTEXT.md §12.1 rule 13: every node must share one scheme with the
+ * dashboard. A page served over HTTPS cannot read an `http://` node — the
+ * browser blocks the request as mixed content before it reaches the network,
+ * and the only symptom is a node that never answers. A dashboard hosted on
+ * Vercel (always HTTPS) therefore cannot reach a rover node on a plain-HTTP
+ * LAN address, so the UI says so rather than letting it read as "offline".
+ */
+export function mixedContentBlocked(baseUrl: string): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.location.protocol !== "https:") return false;
+  return /^http:\/\//i.test(baseUrl.trim());
+}
+
 /** The first enabled node serving an RGB camera stream, if any. */
 export function rgbStreamUrl(nodes: NodeConfig[] = activeNodes()): string | null {
   const node = nodes.find((entry) => entry.enabled && entry.cameraPath);

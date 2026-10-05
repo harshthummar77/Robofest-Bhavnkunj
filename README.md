@@ -128,6 +128,43 @@ A few consequences worth knowing, because they look like missing features:
 - **No recording or snapshot buttons.** Nothing behind them records. The
   mission bookmark stays, because the dashboard owns the mission timeline.
 
+## Deploying
+
+The dashboard is a static build (`npm run build` -> `dist/`), so any static host
+serves it. `vercel.json` sets the build command, output directory, SPA rewrite
+and asset caching; importing the repo on Vercel needs no further configuration.
+
+**A hosted dashboard cannot read a plain-HTTP rover node.** Vercel serves over
+HTTPS, and a browser refuses to let an HTTPS page fetch `http://` or `ws://` —
+the request is blocked as mixed content before it reaches the network, so the
+node reads as permanently offline no matter how correct its address is. This is
+§12.1 rule 13: the dashboard and every node must share one scheme. Settings
+detects the situation and names it rather than leaving a node looking
+misconfigured.
+
+So:
+
+| Where it runs | Mock data | Real rover data |
+|---|---|---|
+| Vercel (HTTPS) | works | blocked, unless the nodes serve HTTPS |
+| `npm run dev` / `npm run preview` on the rover network | works | works |
+| `dist/` served over plain HTTP on the rover network | works | works |
+
+A hosted build is therefore the right home for demos, presentations and sharing
+the interface. **For driving an actual mission, serve it on the rover network**
+— that also removes the dependency on having internet underground.
+
+If a hosted dashboard really must reach the rover, give the nodes HTTPS: put one
+reverse proxy with a certificate in front of all three (a tunnel from the Pi is
+the usual way, since LAN addresses are not publicly routable), and point the
+nodes at those HTTPS URLs in Settings.
+
+### Build-time environment
+
+`VITE_NODE_*` are inlined at build time, so changing them on the host needs a
+redeploy. The Settings page overrides them at runtime and is stored per
+browser, which is usually the easier path for a deployed build.
+
 ## Testing degradation
 
 The multi-source rules are the hard part, so exercise them:

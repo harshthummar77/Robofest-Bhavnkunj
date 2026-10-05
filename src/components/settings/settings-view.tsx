@@ -1,6 +1,6 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
-import { useNodeRegistry, useNodes } from "../../config/nodes";
+import { mixedContentBlocked, useNodeRegistry, useNodes } from "../../config/nodes";
 import { useDataModeStore } from "../../lib/data-mode";
 import { FIELD_CATALOG, fieldLabel } from "../../lib/field-catalog";
 import { formatAge } from "../../lib/mission-clock";
@@ -94,9 +94,13 @@ export function SettingsView() {
     toast.success("Addresses applied — reconnecting");
   }
 
+  // Nodes this page is structurally unable to reach, e.g. a hosted HTTPS
+  // dashboard pointed at an http:// LAN address.
+  const blocked = nodes.filter((node) => node.enabled && mixedContentBlocked(node.baseUrl));
+
   return (
     <div className="space-y-5">
-      <DataModePanel />
+      <DataModePanel blocked={blocked} />
 
       <Panel>
         <PanelHeader
@@ -184,7 +188,7 @@ function pathOrUndefined(value: string | undefined): string | undefined {
 /* Data mode                                                           */
 /* ------------------------------------------------------------------ */
 
-function DataModePanel() {
+function DataModePanel({ blocked }: { blocked: NodeConfig[] }) {
   const mode = useDataModeStore((state) => state.mode);
   const setMode = useDataModeStore((state) => state.setMode);
 
@@ -214,6 +218,27 @@ function DataModePanel() {
         Switching takes effect immediately and clears the current readings, so a value from one
         mode is never shown as if it came from the other.
       </p>
+
+      {/*
+        A hosted dashboard is served over HTTPS, and a browser refuses to let an
+        HTTPS page read an http:// address. The request never reaches the
+        network, so without this the node would simply read as offline forever
+        and the address would look wrong when it is not. §12.1 rule 13.
+      */}
+      {blocked.length > 0 ? (
+        <div className="mt-4 rounded-card border border-warning/40 bg-warning-soft/40 p-4">
+          <p className="text-sm font-medium text-warning">
+            This page is served over HTTPS and cannot reach a plain-HTTP node.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            The browser blocks the request before it leaves the machine, so{" "}
+            {blocked.map((node) => node.label).join(", ")} will never answer from here, whatever
+            the address says. Real data needs the dashboard and the nodes on one scheme: run it
+            from the rover network over HTTP, or put HTTPS in front of the nodes. Mock data is
+            unaffected.
+          </p>
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -406,6 +431,12 @@ function NodeRow({
         {node.telemetryPath}
         {health?.lastError ? ` · ${health.lastError}` : ""}
       </p>
+
+      {mixedContentBlocked(node.baseUrl) ? (
+        <p className="mt-1 text-[11px] text-warning">
+          Blocked by the browser: this page is HTTPS and this address is HTTP.
+        </p>
+      ) : null}
     </div>
   );
 }
