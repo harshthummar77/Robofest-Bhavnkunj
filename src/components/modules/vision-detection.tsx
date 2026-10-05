@@ -38,7 +38,7 @@ import { CameraFeed } from "../vision/camera-feed";
 export function VisionDetectionModule({
   onOpenModule,
 }: {
-  onOpenModule(id: ModuleId): void;
+  onOpenModule(id: ModuleId, personId?: string): void;
 }) {
   const definition = MODULE_BY_ID.get("vision")!;
   const { available, missing, downSources } = useModuleAvailability(definition.fields);
@@ -127,9 +127,14 @@ export function VisionDetectionModule({
               <IconBookmark size={16} />
               Add mission bookmark
             </Button>
+            {/*
+              Named apart from the per-detection "View on map": this one just
+              opens the map, that one opens it following a specific person.
+              Two buttons with one label on one screen is a trap.
+            */}
             <Button variant="ghost" onClick={() => onOpenModule("map")}>
               <IconLocate size={16} />
-              View on map
+              Open mission map
             </Button>
           </div>
         </Panel>
@@ -203,13 +208,18 @@ export function VisionDetectionModule({
                     </div>
 
                     <div className="mt-2 flex gap-2">
-                      <Button size="sm" variant="surface" onClick={() => onOpenModule("map")}>
+                      {/* Both carry the person, so the destination opens on them. §4.5 */}
+                      <Button
+                        size="sm"
+                        variant="surface"
+                        onClick={() => onOpenModule("map", detection.personId)}
+                      >
                         View on map
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => onOpenModule("personnel")}
+                        onClick={() => onOpenModule("personnel", detection.personId)}
                       >
                         History
                       </Button>

@@ -39,6 +39,12 @@ function levelColour(level: MissionEvent["level"]): string {
   }
 }
 
+/** A person the operator is following, drawn as the one emphasised mark. §4.5 */
+export interface MapFocus {
+  pose: Pose;
+  label: string;
+}
+
 export function MissionMapCanvas({
   path,
   pose,
@@ -47,6 +53,7 @@ export function MissionMapCanvas({
   stale,
   onPickEvent,
   replayIndex,
+  focus,
 }: {
   path: Pose[];
   pose: Pose | null;
@@ -57,6 +64,8 @@ export function MissionMapCanvas({
   onPickEvent?(event: MissionEvent): void;
   /** When set, the route is drawn only up to this index (mission replay). */
   replayIndex?: number | null;
+  /** A located person to emphasise above everything else on the map. */
+  focus?: MapFocus | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,7 +80,13 @@ export function MissionMapCanvas({
   );
 
   const bounds = useMemo(() => {
-    const points = [...path, ...events.map((event) => event.pose).filter(Boolean)] as Pose[];
+    const points = [
+      ...path,
+      ...(events.map((event) => event.pose).filter(Boolean) as Pose[]),
+      // A followed person must stay inside the frame even if the rover has
+      // driven well past them.
+      ...(focus ? [focus.pose] : []),
+    ] as Pose[];
     if (points.length === 0) {
       return { minX: -5, maxX: 5, minY: -5, maxY: 5 };
     }
@@ -96,7 +111,7 @@ export function MissionMapCanvas({
       minY: centreY - spanY / 2,
       maxY: centreY + spanY / 2,
     };
-  }, [path, events]);
+  }, [path, events, focus]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -199,6 +214,36 @@ export function MissionMapCanvas({
         context.stroke();
       }
 
+      // The followed person, drawn above the markers and below the rover: a
+      // pulsing ring the operator can find at a glance without hunting the
+      // event list. §4.5
+      if (focus) {
+        const screen = toScreen(focus.pose);
+        // One shared phase so the ring breathes rather than flickering.
+        const phase = (Date.now() % 1600) / 1600;
+        const radius = 12 + phase * 10;
+
+        context.strokeStyle = "#ef4444";
+        context.globalAlpha = 1 - phase;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+        context.stroke();
+        context.globalAlpha = 1;
+
+        context.fillStyle = "#ef4444";
+        context.beginPath();
+        context.arc(screen.x, screen.y, 8, 0, Math.PI * 2);
+        context.fill();
+        context.strokeStyle = theme.background;
+        context.lineWidth = 2;
+        context.stroke();
+
+        context.fillStyle = theme.text;
+        context.font = "600 12px ui-monospace, monospace";
+        context.fillText(focus.label, screen.x + 14, screen.y + 4);
+      }
+
       // Rover marker: interpolate toward the reported pose.
       if (pose) {
         if (!smoothed.current) {
@@ -239,7 +284,7 @@ export function MissionMapCanvas({
       running = false;
       cancelAnimationFrame(frameRef.current);
     };
-  }, [bounds, events, path, pose, stale, theme, visiblePath]);
+  }, [bounds, events, focus, path, pose, stale, theme, visiblePath]);
 
   return (
     <div ref={containerRef} className="relative h-full min-h-[22rem] w-full">

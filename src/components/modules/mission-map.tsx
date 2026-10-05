@@ -9,9 +9,11 @@ import {
   useFieldValue,
   useMissionPath,
   useModuleAvailability,
+  usePersonList,
   useSummary,
   useTelemetry,
 } from "../../lib/telemetry-store";
+import { useFocusedPersonId, useViewFocus } from "../../lib/view-focus";
 import { interpretGps, interpretObstacle } from "../../lib/thresholds";
 import type {
   GpsReading,
@@ -27,7 +29,7 @@ import { Panel, PanelHeader, TechnicalDetail } from "../ui/panel";
 import { ReadingDisplay } from "../layout/reading-display";
 import { StatusBadge } from "../layout/status-badge";
 import { SourceUnavailable } from "../layout/unavailable";
-import { MissionMapCanvas, type MapTheme } from "../map/mission-map-canvas";
+import { MissionMapCanvas, type MapFocus, type MapTheme } from "../map/mission-map-canvas";
 import { useTheme } from "../layout/theme-provider";
 
 /**
@@ -50,6 +52,23 @@ export function MissionMapModule() {
   const travelled = useTelemetry(pathLengthM);
   const events = useTelemetry((state) => state.events);
   const phase = useTelemetry((state) => state.mission.phase);
+
+  // The person the operator arrived here following, if any. §4.5
+  const persons = usePersonList();
+  const focusedId = useFocusedPersonId();
+  const clearFocus = useViewFocus((state) => state.focusPerson);
+  const focusedPerson = persons.find((person) => person.personId === focusedId) ?? null;
+  const focusPose = focusedPerson?.lastKnownPose ?? null;
+  // Memoised so the canvas sees a stable object: it restarts its draw loop
+  // whenever this changes, and a fresh object every render would restart it
+  // on every telemetry frame.
+  const focus: MapFocus | null = useMemo(
+    () =>
+      focusPose && focusedPerson
+        ? { pose: focusPose, label: focusedPerson.personId }
+        : null,
+    [focusPose, focusedPerson],
+  );
 
   const [selected, setSelected] = useState<MissionEvent | null>(null);
   const [replayIndex, setReplayIndex] = useState<number | null>(null);
@@ -108,6 +127,30 @@ export function MissionMapModule() {
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_22rem]">
       <Panel className="flex flex-col p-3">
+        {focusedPerson ? (
+          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-critical/40 bg-critical-soft px-3 py-2">
+            <span className="font-mono text-sm font-semibold text-critical">
+              {focusedPerson.personId}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {focusedPerson.lastKnownPose
+                ? `Last seen ${formatTime(focusedPerson.lastSeenAt)} at x ${focusedPerson.lastKnownPose.x.toFixed(1)} m, y ${focusedPerson.lastKnownPose.y.toFixed(1)} m`
+                : // A detection with no pose is not a bug: nothing was reporting
+                  // position when the camera saw them. Say that, rather than
+                  // dropping the person off the map silently. §12.1 rule 7
+                  "No position was recorded — no node was reporting pose when this person was detected"}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ml-auto"
+              onClick={() => clearFocus(null)}
+            >
+              Stop following
+            </Button>
+          </div>
+        ) : null}
+
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-2">
           <div className="flex items-center gap-2">
             <StatusBadge
@@ -153,6 +196,7 @@ export function MissionMapModule() {
             theme={mapTheme}
             stale={stale}
             replayIndex={replayIndex}
+            focus={focus}
             onPickEvent={setSelected}
           />
         </div>

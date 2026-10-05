@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { formatDateTime, formatTime } from "../../lib/mission-clock";
 import { usePersonList, useSummary } from "../../lib/telemetry-store";
+import { useFocusedPersonId, useViewFocus } from "../../lib/view-focus";
 import type { ModuleId, PersonRecord, PersonStatus, StatusLevel } from "../../lib/types";
 import { cn } from "../../lib/utils";
 import { IconLocate, IconPersonnel } from "../icons";
@@ -33,12 +34,23 @@ const STATUS_LEVEL: Record<PersonStatus, StatusLevel> = {
 export function PersonnelTrackingModule({
   onOpenModule,
 }: {
-  onOpenModule(id: ModuleId): void;
+  onOpenModule(id: ModuleId, personId?: string): void;
 }) {
   const persons = usePersonList();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const focusedId = useFocusedPersonId();
+  const focusPerson = useViewFocus((state) => state.focusPerson);
+  const [ownSelection, setOwnSelection] = useState<string | null>(null);
 
+  // Arriving here about a particular person — from the palette, or from a
+  // detection in Vision — opens on them. §4.5
+  const selectedId = ownSelection ?? focusedId;
   const selected = persons.find((person) => person.personId === selectedId) ?? null;
+
+  function select(personId: string): void {
+    setOwnSelection(personId);
+    // Selecting here also sets what the Map highlights, so the two views agree.
+    focusPerson(personId);
+  }
 
   return (
     <div className="grid gap-5 xl:grid-cols-[24rem_1fr]">
@@ -57,7 +69,7 @@ export function PersonnelTrackingModule({
             <li key={person.personId}>
               <button
                 type="button"
-                onClick={() => setSelectedId(person.personId)}
+                onClick={() => select(person.personId)}
                 className={cn(
                   "w-full rounded-xl border p-3 text-left transition-state",
                   person.personId === selectedId
@@ -128,7 +140,7 @@ function PersonDetail({
   onOpenModule,
 }: {
   person: PersonRecord;
-  onOpenModule(id: ModuleId): void;
+  onOpenModule(id: ModuleId, personId?: string): void;
 }) {
   return (
     <>
@@ -149,7 +161,17 @@ function PersonDetail({
               level={STATUS_LEVEL[person.status]}
               label={STATUS_LABEL[person.status]}
             />
-            <Button size="sm" variant="surface" onClick={() => onOpenModule("map")}>
+            <Button
+              size="sm"
+              variant="surface"
+              disabled={person.lastKnownPose === null}
+              title={
+                person.lastKnownPose === null
+                  ? "No position was recorded for this detection — no node was reporting pose at the time"
+                  : "Highlight this person on the mission map"
+              }
+              onClick={() => onOpenModule("map", person.personId)}
+            >
               <IconLocate size={16} />
               Show on map
             </Button>

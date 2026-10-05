@@ -22,6 +22,7 @@ dashboard is populated with no rover and no server running.
 | `npm run dev:all` | Both together |
 | `npm run typecheck` | Full TypeScript check |
 | `npm run check:ingest` | Replays each node's wire shape through the ingest layer and asserts every value routes to the field the catalogue names |
+| `npm run check:chain` | Walks a person detection through all six views it touches (needs `npm run dev` running) |
 | `npm run smoke` | Headless Chrome check: app mounts, all eight modules render, no render loop (needs `npm run dev` running) |
 | `npm run build` | Production build |
 
@@ -124,6 +125,33 @@ and it does not count towards overall communications state.
 A configured camera renders even when no node is reporting detections: a rover
 with a camera and no AI node yet still has a picture worth watching, and the
 detections panel says so rather than hiding the feed.
+
+## When a person is detected
+
+One detection drives six views (PROJECT_CONTEXT.md §7), and the links between
+them are the easy thing to break:
+
+1. The camera node reports a box. A mission ID is attached — the node's track
+   id when it has one, otherwise assigned by frame-to-frame proximity.
+2. A person record is created, and the detection is placed on the map using the
+   pose **at the detection timestamp**, read from the pose history buffer, not
+   the pose at render time.
+3. A CRITICAL alert is raised in the persistent alert surface, never a toast.
+4. The thermal node confirming the same ID flips the record to RECONFIRMED and
+   adds a thermal entry to its history.
+5. Personnel Tracking carries the record: first seen, last seen, confirmations,
+   and every entry's reporting node.
+6. The mission report counts them, times them and names where each finding came
+   from.
+
+Choosing a person anywhere — a detection card, the Personnel list, or the
+command palette — carries them to wherever you go next: the Mission Map
+highlights that person and says who it is following until you stop. A person
+detected while nothing was reporting pose has no map position, and the map says
+exactly that rather than dropping them silently.
+
+`npm run check:chain` walks the whole flow in a headless browser against the
+mock rover. It needs `npm run dev` running.
 
 ## Only what the hardware reports
 

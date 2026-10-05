@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Toaster } from "react-hot-toast";
 import { MODULE_BY_ID } from "./config/modules";
 import { useTelemetryRuntime } from "./lib/use-telemetry-runtime";
+import { focusPerson } from "./lib/view-focus";
 import type { ModuleId } from "./lib/types";
 import { CommandPalette } from "./components/command/command-palette";
 import { AlertIndicator } from "./components/layout/alert-indicator";
@@ -46,7 +47,12 @@ export default function App() {
 
   const [view, setView] = useState<View>({ kind: "landing" });
 
-  const openModule = useCallback((id: ModuleId) => {
+  // A module can be opened about a particular person — from the command
+  // palette, or from "view on map" next to a detection. The person travels
+  // with the navigation so the destination opens already pointing at them.
+  // §4.5
+  const openModule = useCallback((id: ModuleId, personId?: string) => {
+    if (personId !== undefined) focusPerson(personId);
     setView({ kind: "module", id });
   }, []);
 

@@ -12,7 +12,8 @@
     "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
     "smoke": "tsx scripts/smoke.ts",
-    "check:ingest": "tsx scripts/ingest-check.ts"
+    "check:ingest": "tsx scripts/ingest-check.ts",
+    "check:chain": "tsx scripts/detection-chain-check.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
