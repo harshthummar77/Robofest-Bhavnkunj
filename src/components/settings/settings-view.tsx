@@ -5,7 +5,13 @@ import { useDataModeStore } from "../../lib/data-mode";
 import { FIELD_CATALOG, fieldLabel } from "../../lib/field-catalog";
 import { formatAge } from "../../lib/mission-clock";
 import { useSourceHealthList, useTelemetry } from "../../lib/telemetry-store";
-import type { MockProfile, NodeConfig, SourceState, TelemetryField } from "../../lib/types";
+import type {
+  CameraKind,
+  MockProfile,
+  NodeConfig,
+  SourceState,
+  TelemetryField,
+} from "../../lib/types";
 import { cn } from "../../lib/utils";
 import { IconNode, IconPlus, IconReset, IconTrash } from "../icons";
 import { Button } from "../ui/button";
@@ -27,6 +33,11 @@ const TRANSPORTS: { id: NodeConfig["transport"]; label: string }[] = [
   { id: "http-poll", label: "HTTP poll" },
   { id: "websocket", label: "WebSocket" },
   { id: "none", label: "Stream only" },
+];
+
+const CAMERA_KINDS: { id: CameraKind; label: string }[] = [
+  { id: "mjpeg", label: "MJPEG image" },
+  { id: "whep", label: "WebRTC (WHEP)" },
 ];
 
 const PROFILES: { id: MockProfile; label: string }[] = [
@@ -174,6 +185,7 @@ function normalise(node: NodeConfig): NodeConfig {
     baseUrl: baseUrl.replace(/\/$/, ""),
     telemetryPath: path === "" ? "" : path.startsWith("/") ? path : `/${path}`,
     cameraPath: pathOrUndefined(node.cameraPath),
+    cameraKind: node.cameraKind ?? "mjpeg",
     thermalPath: pathOrUndefined(node.thermalPath),
   };
 }
@@ -380,12 +392,40 @@ function NodeRow({
             onChange({ expectedIntervalMs: Number.isFinite(parsed) ? parsed : 1000 });
           }}
         />
-        <Field
-          label="Camera path (MJPEG)"
-          value={node.cameraPath ?? ""}
-          placeholder="/stream.mjpg"
-          onChange={(value) => onChange({ cameraPath: value })}
-        />
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-faint-foreground uppercase">
+            Camera path
+          </span>
+          <div className="flex gap-1.5">
+            <input
+              value={node.cameraPath ?? ""}
+              placeholder={node.cameraKind === "whep" ? "/cam" : "/stream.mjpg"}
+              spellCheck={false}
+              aria-label="Camera path"
+              onChange={(event) => onChange({ cameraPath: event.target.value })}
+              className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 text-sm text-foreground placeholder:text-faint-foreground focus:border-primary/60 focus:outline-none"
+            />
+            <select
+              value={node.cameraKind ?? "mjpeg"}
+              aria-label="Camera stream type"
+              onChange={(event) =>
+                onChange({ cameraKind: event.target.value as CameraKind })
+              }
+              className="h-9 shrink-0 rounded-md border border-border bg-background px-1.5 text-xs text-foreground focus:border-primary/60 focus:outline-none"
+            >
+              {CAMERA_KINDS.map((kind) => (
+                <option key={kind.id} value={kind.id}>
+                  {kind.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {node.cameraKind === "whep" ? (
+            <span className="text-[10px] text-faint-foreground">
+              MediaMTX: the stream name, e.g. /cam. The /whep suffix is added for you.
+            </span>
+          ) : null}
+        </div>
         <Field
           label="Thermal image path"
           value={node.thermalPath ?? ""}

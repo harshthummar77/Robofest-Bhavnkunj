@@ -1,5 +1,6 @@
 import toast from "react-hot-toast";
 import { MODULE_BY_ID } from "../../config/modules";
+import { rgbCamera, useNodes } from "../../config/nodes";
 import { formatTime, missionNow } from "../../lib/mission-clock";
 import {
   fieldValue,
@@ -13,6 +14,7 @@ import {
 } from "../../lib/telemetry-store";
 import { interpretConfidence } from "../../lib/thresholds";
 import type { Detection, ModuleId, StatusLevel } from "../../lib/types";
+import { useIsMockMode } from "../../lib/data-mode";
 import { cn } from "../../lib/utils";
 import { IconBookmark, IconLocate } from "../icons";
 import { Button } from "../ui/button";
@@ -40,6 +42,12 @@ export function VisionDetectionModule({
 }) {
   const definition = MODULE_BY_ID.get("vision")!;
   const { available, missing, downSources } = useModuleAvailability(definition.fields);
+  const nodes = useNodes();
+  const mock = useIsMockMode();
+  // The camera is a media stream, not a telemetry field, so it is not gated by
+  // the detection fields: a rover with a camera and no AI node yet still has a
+  // picture worth watching, and that is a normal stage of bringing one up.
+  const hasCamera = mock || rgbCamera(nodes.filter((node) => node.enabled)) !== null;
   const detectionsResolution = useFieldResolution<Detection[]>("detections");
   const fps = useFieldValue<number>("cameraFps");
   const aiStatus = useFieldValue<string>("aiStatus");
@@ -63,7 +71,7 @@ export function VisionDetectionModule({
     toast.success("Mission bookmark added");
   }
 
-  if (!available) {
+  if (!available && !hasCamera) {
     return (
       <SourceUnavailable
         message={definition.degradedMessage}
@@ -141,7 +149,9 @@ export function VisionDetectionModule({
           <div className="space-y-2">
             {people.length === 0 ? (
               <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                Nothing detected in the current frame.
+                {available
+                  ? "Nothing detected in the current frame."
+                  : "No node is reporting detections — the camera is shown without AI overlays."}
               </p>
             ) : (
               people.map((detection) => {

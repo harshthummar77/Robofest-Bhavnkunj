@@ -29,6 +29,15 @@ export type Transport = "http-poll" | "websocket" | "none";
 export type MockProfile = "vision" | "thermal" | "environment" | "motion";
 
 /**
+ * How a node publishes its camera.
+ *
+ * `mjpeg` is a multipart image stream an <img> can render directly.
+ * `whep` is WebRTC, as served by MediaMTX and anything else WHEP-compliant —
+ * the low-latency option, and the right one for driving (§4.9).
+ */
+export type CameraKind = "mjpeg" | "whep";
+
+/**
  * One rover node. Addresses live only in the registry
  * (`src/config/nodes.ts` + the Settings view) — never in a component.
  */
@@ -45,8 +54,10 @@ export interface NodeConfig {
   expectedIntervalMs: number;
   /** A disabled node is not polled and is not counted in overall comms. */
   enabled: boolean;
-  /** MJPEG/snapshot path for an RGB camera this node serves. */
+  /** Path to an RGB camera this node serves. */
   cameraPath?: string;
+  /** How to consume `cameraPath`. Defaults to an MJPEG image stream. */
+  cameraKind?: CameraKind;
   /** MJPEG/snapshot path for a thermal camera this node serves as an image. */
   thermalPath?: string;
   /** Which mock streams this node emits in mock data mode. */

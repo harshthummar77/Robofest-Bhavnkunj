@@ -682,11 +682,21 @@ export function sourceHealthList(state: TelemetryState): SourceHealth[] {
     .filter(Boolean);
 }
 
-/** Overall comms = worst state among the enabled nodes. §4.6. */
+/**
+ * Overall comms = worst state among the enabled nodes that publish telemetry.
+ * §4.6.
+ *
+ * A stream-only node (a camera, no JSON endpoint) is skipped: it has no
+ * telemetry channel to be silent on, so counting it would report the whole
+ * rover as offline whenever a camera is configured on its own host.
+ */
 export function overallCommsState(state: TelemetryState): SourceState {
   const order: SourceState[] = ["ONLINE", "DEGRADED", "STALE", "OFFLINE"];
+  const reporting = activeNodes().filter((node) => node.transport !== "none");
+  if (reporting.length === 0) return "OFFLINE";
+
   let worstIndex = 0;
-  for (const node of activeNodes()) {
+  for (const node of reporting) {
     const entry = state.health[node.id];
     if (!entry) continue;
     worstIndex = Math.max(worstIndex, order.indexOf(entry.state));

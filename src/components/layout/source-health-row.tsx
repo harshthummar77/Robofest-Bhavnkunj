@@ -11,7 +11,11 @@ import { SourceStateBadge } from "./status-badge";
  * connectivity, so this is where technical detail is allowed to surface.
  */
 export function SourceHealthRow({ source }: { source: SourceHealth }) {
-  const offline = source.state === "OFFLINE";
+  // A stream-only node has no telemetry channel, so it has no connection state
+  // to report. Showing it as OFFLINE would be a fault that is not one — the
+  // camera element reports its own health on the view that plays it.
+  const streamOnly = source.transport === "none";
+  const offline = !streamOnly && source.state === "OFFLINE";
 
   return (
     <div
@@ -35,9 +39,15 @@ export function SourceHealthRow({ source }: { source: SourceHealth }) {
         </div>
 
         <div className="shrink-0 text-right">
-          <SourceStateBadge state={source.state} />
+          {streamOnly ? (
+            <span className="rounded-full bg-unknown-soft px-2.5 py-1 text-[11px] text-unknown">
+              Stream only
+            </span>
+          ) : (
+            <SourceStateBadge state={source.state} />
+          )}
           <p className="mt-1 text-[11px] text-faint-foreground">
-            {formatAge(source.lastUpdateAt)}
+            {streamOnly ? "no telemetry channel" : formatAge(source.lastUpdateAt)}
           </p>
         </div>
       </div>

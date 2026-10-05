@@ -1,15 +1,17 @@
-import { useEffect, useRef } from "react";
-import { rgbStreamUrl, useNodes } from "../../config/nodes";
+import { useEffect, useRef, useState } from "react";
+import { rgbCamera, useNodes } from "../../config/nodes";
 import { useIsMockMode } from "../../lib/data-mode";
+import { startWhep, type WhepState } from "../../lib/webrtc/whep";
 import type { Detection } from "../../lib/types";
 import { cn } from "../../lib/utils";
 
 /**
  * The RGB surface.
  *
- * In real mode this is the MJPEG endpoint of whichever node declares a camera
- * path — the dashboard consumes it as an image source, exactly as
- * PROJECT_CONTEXT.md §12 specifies, and never through the telemetry channel.
+ * In real mode this is whatever the camera node publishes — an MJPEG image
+ * stream consumed directly by an <img>, or a WebRTC stream from a WHEP server
+ * such as MediaMTX. Either way it is consumed as media, never through the
+ * telemetry channel (PROJECT_CONTEXT.md §12).
  *
  * In mock mode there is no camera to read, so rather than show a dead black
  * box the simulated scene is drawn here: a tunnel the rover is advancing
@@ -28,13 +30,13 @@ export function CameraFeed({
 }) {
   const mock = useIsMockMode();
   const nodes = useNodes();
-  const streamUrl = rgbStreamUrl(nodes.filter((node) => node.enabled));
+  const camera = rgbCamera(nodes.filter((node) => node.enabled));
 
   if (mock) {
     return <MockCameraScene detections={detections} className={className} />;
   }
 
-  if (!streamUrl) {
+  if (!camera) {
     return (
       <div
         className={cn(
@@ -42,14 +44,18 @@ export function CameraFeed({
           className,
         )}
       >
-        No camera stream configured — set a camera path on a node in Settings.
+        No camera configured — set a camera path on a node in Settings.
       </div>
     );
   }
 
+  if (camera.kind === "whep") {
+    return <WebRtcFeed url={camera.url} stale={stale} className={className} />;
+  }
+
   return (
     <img
-      src={streamUrl}
+      src={camera.url}
       alt="Live RGB feed from the rover camera"
       className={cn(
         "h-full w-full object-cover transition-state",
@@ -57,6 +63,78 @@ export function CameraFeed({
         className,
       )}
     />
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* WebRTC                                                              */
+/* ------------------------------------------------------------------ */
+
+/** How long to wait before retrying a stream that failed to start. */
+const RETRY_MS = 4000;
+
+function WebRtcFeed({
+  url,
+  stale,
+  className,
+}: {
+  url: string;
+  stale: boolean;
+  className?: string;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [state, setState] = useState<WhepState>("connecting");
+  const [detail, setDetail] = useState<string | null>(null);
+  // Bumped to force a fresh session after a failure.
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const session = startWhep(url, video, (next, why) => {
+      setState(next);
+      setDetail(why ?? null);
+    });
+
+    return () => session.close();
+  }, [url, attempt]);
+
+  // A camera that drops out must come back on its own: the pilot has both
+  // hands on the transmitter and cannot reload a page. §4.9
+  useEffect(() => {
+    if (state !== "failed") return;
+    const timer = setTimeout(() => setAttempt((count) => count + 1), RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [state]);
+
+  return (
+    <div className={cn("relative h-full w-full bg-black", className)}>
+      <video
+        ref={videoRef}
+        // Muted and playsInline so the browser allows autoplay; the dashboard
+        // plays no audio.
+        muted
+        playsInline
+        autoPlay
+        className={cn(
+          "h-full w-full object-cover transition-state",
+          (stale || state !== "live") && "opacity-60",
+        )}
+      />
+
+      {state !== "live" ? (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
+          <p className="text-sm text-white/70">
+            {state === "connecting" ? "Connecting to the camera…" : "Camera stream unavailable"}
+          </p>
+          {detail ? <p className="text-[11px] text-white/45">{detail}</p> : null}
+          {state === "failed" ? (
+            <p className="text-[11px] text-white/45">Retrying automatically.</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

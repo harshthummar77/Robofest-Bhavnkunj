@@ -102,6 +102,29 @@ else changes. To add a genuinely new value, add it to `TelemetryField`,
 `src/lib/field-catalog.ts` (which names its component and its module) and the
 view that shows it.
 
+## The camera
+
+The RGB surface takes either kind of stream, set per node in Settings:
+
+| Kind | Path to enter | Notes |
+|---|---|---|
+| MJPEG image | `/stream.mjpg` | Consumed by an `<img>`. Whatever a Pi camera script serves. |
+| WebRTC (WHEP) | `/cam` | For MediaMTX and any WHEP server. The `/whep` suffix is added for you, so the URL from the browser bar works as typed. |
+
+MediaMTX also serves HLS on port 8888, which this dashboard deliberately does
+not use: HLS buffers segments and runs two to six seconds behind. The pilot
+drives from this picture, and a two-second-old tunnel is worse than no tunnel
+because it looks current. WebRTC on a LAN is tenths of a second.
+
+The camera may live on its own host — set that node's transport to **Stream
+only** and leave the telemetry path empty. Such a node has no telemetry channel,
+so it is shown as "stream only" in Rover Health rather than as an offline fault,
+and it does not count towards overall communications state.
+
+A configured camera renders even when no node is reporting detections: a rover
+with a camera and no AI node yet still has a picture worth watching, and the
+detections panel says so rather than hiding the feed.
+
 ## Only what the hardware reports
 
 `src/lib/field-catalog.ts` is the whole contract: every value the dashboard can

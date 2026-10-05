@@ -13,7 +13,7 @@
 
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
-import type { NodeConfig, SourceId } from "../lib/types";
+import type { CameraKind, NodeConfig, SourceId } from "../lib/types";
 
 const STORAGE_KEY = "orionpax:nodes-v2";
 
@@ -108,6 +108,7 @@ function sanitise(entry: unknown, index: number): NodeConfig | null {
         : 1000,
     enabled: raw.enabled !== false,
     cameraPath: typeof raw.cameraPath === "string" && raw.cameraPath ? raw.cameraPath : undefined,
+    cameraKind: raw.cameraKind === "whep" ? "whep" : "mjpeg",
     thermalPath:
       typeof raw.thermalPath === "string" && raw.thermalPath ? raw.thermalPath : undefined,
     mockProfiles: Array.isArray(raw.mockProfiles)
@@ -243,10 +244,32 @@ export function mixedContentBlocked(baseUrl: string): boolean {
   return /^http:\/\//i.test(baseUrl.trim());
 }
 
-/** The first enabled node serving an RGB camera stream, if any. */
-export function rgbStreamUrl(nodes: NodeConfig[] = activeNodes()): string | null {
+export interface CameraSource {
+  url: string;
+  kind: CameraKind;
+  /** The node that serves it, for provenance in the UI. */
+  nodeId: SourceId;
+}
+
+/**
+ * The first enabled node serving an RGB camera.
+ *
+ * A WHEP path is normalised here: MediaMTX publishes the player page at
+ * `/<path>/` and the WebRTC endpoint at `/<path>/whep`, and pasting the URL
+ * from the browser bar gives the former. Accepting both is one line here and
+ * saves an opaque failure for whoever is configuring the rover.
+ */
+export function rgbCamera(nodes: NodeConfig[] = activeNodes()): CameraSource | null {
   const node = nodes.find((entry) => entry.enabled && entry.cameraPath);
-  return node ? nodeUrl(node, node.cameraPath) : null;
+  if (!node || !node.cameraPath) return null;
+
+  const kind: CameraKind = node.cameraKind ?? "mjpeg";
+  let path = node.cameraPath;
+  if (kind === "whep" && !/\/whep\/?$/i.test(path)) {
+    path = `${path.replace(/\/$/, "")}/whep`;
+  }
+
+  return { url: nodeUrl(node, path), kind, nodeId: node.id };
 }
 
 /** The first enabled node serving a thermal image stream, if any. */
