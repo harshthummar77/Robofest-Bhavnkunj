@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+!.yarn/plugins
+!.yarn/versions
+
+# ---------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------
+dist/
+dist-ssr/
+build/
+.vite/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------
+# Environment — node addresses live here
+# ---------------------------------------------------------------
+# .env.local holds the rover's real LAN addresses (VITE_NODE_*). It is per
+# deployment and must not be committed. .env.example is the tracked template.
+.env
+.env.*
+!.env.example
+*.local
+
+# ---------------------------------------------------------------
+# Logs and caches
+# ---------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm/
+.eslintcache
+.oxlintcache
+coverage/
+.nyc_output/
+
+# ---------------------------------------------------------------
+# Test and debug artefacts
+# ---------------------------------------------------------------
+# `npm run smoke` drives headless Chrome; scratch scripts are prefixed with _
+# so a throwaway probe never lands in a commit.
+scripts/_*
+screenshots/
+*.png.tmp
+.puppeteer/
+test-results/
+
+# ---------------------------------------------------------------
+# Mission data captured from a real rover
+# ---------------------------------------------------------------
+# Recorded telemetry, generated mission reports and exported captures are
+# run artefacts, not source.
+recordings/
+captures/
+*_report.txt
+
+# ---------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+.DS_Store
+Thumbs.db
+desktop.ini
