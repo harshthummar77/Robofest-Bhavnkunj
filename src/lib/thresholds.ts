@@ -212,7 +212,15 @@ export function interpretGas(readings: GasReading[] | null): Interpretation {
     UNKNOWN: "Air condition unknown",
   };
   const exact = readings
-    .map((reading) => `${reading.label} ${(reading.raw * 100).toFixed(0)}% of scale`)
+    .map(
+      (reading) =>
+        `${reading.label} ${(reading.raw * 100).toFixed(0)}% of scale` +
+        // A railed converter cannot report how far past the top it is, and an
+        // MQ sensor also reads high for minutes after power-on. The status is
+        // not softened — a saturated reading may be a real hazard — but the
+        // operator is told the number is a floor, not a measurement.
+        (reading.raw >= 1 ? " (saturated — at least this)" : ""),
+    )
     .join(" · ");
   return { level, message: words[level], exact };
 }

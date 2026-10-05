@@ -160,14 +160,33 @@ export function SettingsView() {
           </div>
         </div>
 
-        <p className="mt-3 text-[11px] text-faint-foreground">
-          Every node must send{" "}
-          <code className="rounded bg-surface-raised px-1 font-mono">
-            Access-Control-Allow-Origin
-          </code>{" "}
-          for this dashboard&apos;s origin, and all nodes must share one scheme — a dashboard
-          served over HTTPS cannot read an HTTP node.
-        </p>
+        <div className="mt-3 space-y-1.5 text-[11px] text-faint-foreground">
+          <p>
+            Every node must send{" "}
+            <code className="rounded bg-surface-raised px-1 font-mono">
+              Access-Control-Allow-Origin
+            </code>{" "}
+            for this dashboard&apos;s origin, and all nodes must share one scheme — a dashboard
+            served over HTTPS cannot read an HTTP node.
+          </p>
+          {/*
+            A node answering curl but not the dashboard is almost always this,
+            and the browser is not allowed to say so. Give the fix rather than
+            the diagnosis.
+          */}
+          <p>
+            A node that answers <code className="font-mono">curl</code> but reads as offline here
+            is missing that header. On an ESP32 sketch:{" "}
+            <code className="rounded bg-surface-raised px-1 font-mono">
+              server.sendHeader(&quot;Access-Control-Allow-Origin&quot;, &quot;*&quot;)
+            </code>{" "}
+            before each response, or{" "}
+            <code className="rounded bg-surface-raised px-1 font-mono">
+              DefaultHeaders::Instance().addHeader(...)
+            </code>{" "}
+            once with ESPAsyncWebServer.
+          </p>
+        </div>
       </Panel>
 
       <LiveDataPanel />

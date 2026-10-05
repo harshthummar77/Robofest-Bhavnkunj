@@ -3,6 +3,26 @@ import type { Connector, ConnectorSink } from "./types";
 import type { NodeConfig } from "../types";
 
 /**
+ * Why a fetch failed, in terms the operator can act on.
+ *
+ * A browser deliberately refuses to tell a page whether a cross-origin request
+ * was refused or simply never answered — both surface as the same bare
+ * TypeError. The two causes need different fixes, and "Failed to fetch" points
+ * at neither, so both are named. A node that does not send
+ * `Access-Control-Allow-Origin` is the usual culprit, because a microcontroller
+ * sketch has no reason to send it until something asks.
+ */
+function describeFetchFailure(error: unknown): string {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "request timed out";
+  }
+  if (error instanceof TypeError) {
+    return "no response — the node is unreachable, or it did not allow this origin (CORS)";
+  }
+  return error instanceof Error ? error.message : "request failed";
+}
+
+/**
  * HTTP polling connector for one node. This is the transport the rover uses
  * today (PROJECT_CONTEXT.md §12).
  *
@@ -80,13 +100,7 @@ export function createHttpPollConnector(node: NodeConfig, sink: ConnectorSink): 
       schedule(false);
     } catch (error) {
       if (controller.signal.aborted && stopped) return;
-      const message =
-        error instanceof DOMException && error.name === "AbortError"
-          ? "request timed out"
-          : error instanceof Error
-            ? error.message
-            : "request failed";
-      fail(message);
+      fail(describeFetchFailure(error));
     } finally {
       clearTimeout(timeout);
       if (inFlight === controller) inFlight = null;

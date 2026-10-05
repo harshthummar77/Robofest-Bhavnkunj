@@ -90,6 +90,13 @@ Recognition is deliberately conservative:
 - Units convert only where they are unambiguous: Pa→hPa, mm→cm, knots→km/h,
   centi-degrees→degrees. Otherwise the sensor's native unit is assumed.
 
+A node may also say which of its sensors are present. A block carrying
+`"available": false` has everything under it dropped, because firmware usually
+reports zeros for a sensor that failed to initialise and a zero that looks like
+a reading is the failure §12.1 rule 7 exists to prevent. Housekeeping fields —
+uptime, IP, Wi-Fi RSSI, GPIO pin numbers, availability flags — are ignored
+rather than reported as unrecognised.
+
 Both flat and nested shapes work, e.g. all of these are the air temperature:
 
 ```json
@@ -176,6 +183,11 @@ A few consequences worth knowing, because they look like missing features:
   from the node and is labelled relative.
 - **No odometer.** There are no wheel encoders, so the map shows route length
   summed from the reported poses.
+- **No position without a fix.** A GPS reporting `0, 0` is reporting nothing;
+  those coordinates are dropped rather than placed on the map.
+- **No air temperature from the IMU.** The MPU6050 reports its own die
+  temperature, which is the silicon inside the chassis, not the air. It is
+  shown under board health, never as the environment reading.
 - **No recording or snapshot buttons.** Nothing behind them records. The
   mission bookmark stays, because the dashboard owns the mission timeline.
 

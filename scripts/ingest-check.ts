@@ -133,6 +133,73 @@ check("a payload with nothing recognisable is rejected", !noise.ok);
 const imuTemp = ingestPayload("imu-only", { mpu6050: { temperature: 41.5 } });
 check("IMU die temperature is not shown as air temperature", !imuTemp.ok);
 
+/* ---- 3b. a real ESP32 sensor node --------------------------------- */
+
+console.log("");
+console.log("real ESP32 payload (nested blocks, availability flags)");
+
+const esp32 = ingestPayload("esp32a", {
+  system: { online: true, uptime_ms: 123241, ip: "10.24.65.111", rssi: -71 },
+  gps: {
+    available: true,
+    fix: false,
+    latitude: 0,
+    longitude: 0,
+    altitude_m: 0,
+    satellites: 0,
+    hdop: 99.99,
+    characters_received: 19206,
+  },
+  mpu6050: {
+    available: true,
+    accel_x: -0.613, accel_y: 0.19, accel_z: -0.68,
+    gyro_x: 1.07, gyro_y: -1.66, gyro_z: -0.64,
+    temperature: 46.39,
+  },
+  bme280: { available: true, temperature: 26.43, humidity: 32.27, pressure_hpa: 1003.19 },
+  gas: { mq2_adc: 4095, mq135_adc: 1278 },
+  outputs: { buzzer_gpio: 27, audio_dac_gpio: 25 },
+});
+check("real ESP32 payload is recognised", esp32.ok);
+if (esp32.ok) {
+  const patch = esp32.result.patch as Record<string, unknown>;
+  check("BME280 air temperature is read", patch.temperature === 26.43);
+  check("pressure_hpa is read", patch.pressure === 1003.19);
+  check(
+    "IMU die temperature is not shown as air temperature",
+    (patch.imu as { dieTempC?: number }).dieTempC === 46.39 && patch.temperature === 26.43,
+  );
+  check(
+    "no fix means no coordinates, not 0,0",
+    (patch.gps as { latitude?: number }).latitude === undefined,
+    JSON.stringify(patch.gps),
+  );
+  check(
+    "a railed gas ADC reads as full scale",
+    (patch.gas as { raw: number }[])[0].raw === 1,
+  );
+  check(
+    "housekeeping and pin numbers are not flagged as unrecognised",
+    esp32.result.unknownKeys.length === 0,
+    esp32.result.unknownKeys.join(", "),
+  );
+}
+
+const unavailable = ingestPayload("esp32a", {
+  bme280: { available: false, temperature: 0, humidity: 0, pressure_hpa: 0 },
+  gas: { mq2_adc: 512 },
+});
+check("a sensor marked unavailable contributes nothing", unavailable.ok);
+if (unavailable.ok) {
+  check(
+    "its zeros are not stored as readings",
+    !("temperature" in unavailable.result.patch) &&
+      !("humidity" in unavailable.result.patch),
+    JSON.stringify(unavailable.result.patch),
+  );
+  check("the working sensor still reports", "gas" in unavailable.result.patch);
+}
+
 /* ---- 4. no fabricated values -------------------------------------- */
 
 console.log("\nabsent stays absent");

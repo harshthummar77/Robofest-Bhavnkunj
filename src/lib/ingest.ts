@@ -83,6 +83,25 @@ interface ArrayNode {
   value: unknown[];
 }
 
+/**
+ * Sensor blocks a node has declared unavailable.
+ *
+ * Firmware commonly reports `{ "bme280": { "available": false, "temperature": 0 } }`
+ * when a sensor failed to initialise. Those zeros are not readings, and
+ * displaying them would be the exact failure §12.1 rule 7 forbids — a false
+ * 0 reads as a real measurement. Everything under such a block is dropped.
+ */
+function unavailablePrefixes(raw: Record<string, unknown>): string[] {
+  const prefixes: string[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) continue;
+    const block = value as Record<string, unknown>;
+    const flag = block.available ?? block.ok ?? block.present ?? block.detected;
+    if (flag === false) prefixes.push(`${key}.`);
+  }
+  return prefixes;
+}
+
 function norm(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -127,7 +146,15 @@ function index(raw: Record<string, unknown>): { leaves: Leaf[]; arrays: ArrayNod
   }
 
   walk(raw, [], 0);
-  return { leaves, arrays };
+
+  const dropped = unavailablePrefixes(raw);
+  if (dropped.length === 0) return { leaves, arrays };
+
+  const kept = (path: string) => !dropped.some((prefix) => path.startsWith(prefix));
+  return {
+    leaves: leaves.filter((leaf) => kept(leaf.path)),
+    arrays: arrays.filter((entry) => kept(entry.path)),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -291,11 +318,20 @@ class Picker {
       "ip",
       "mac",
       "ssid",
+      // Housekeeping a node reports about itself, not a measurement.
+      "available",
+      "present",
+      "online",
+      "enabled",
+      "charactersreceived",
+      "bytesreceived",
     ]);
     const out: string[] = [];
     for (const leaf of this.leaves) {
       if (this.consumed.has(leaf.path)) continue;
       if (ignorable.has(leaf.key)) continue;
+      // Pin assignments and similar wiring detail are configuration, not data.
+      if (/gpio|pin$|_pin/.test(leaf.key)) continue;
       out.push(leaf.path);
     }
     for (const entry of this.arrays) {
@@ -755,6 +791,11 @@ function extractImu(pick: Picker): ImuReading | null {
   let pitch = pick.number(["pitch"], { range: [-180, 180] });
   let roll = pick.number(["roll"], { range: [-180, 180] });
   const yaw = pick.number(["yaw"], { range: [-360, 360], under: SCOPE.imu });
+  // The IMU's own die temperature, kept apart from the air temperature.
+  const dieTempC = pick.number(["temperature", "temp"], {
+    under: SCOPE.imu,
+    range: [-40, 125],
+  });
 
   // Pitch and roll are solvable from gravity alone; derive them when the node
   // sends only raw accelerometer counts. Yaw is never derived — without a
@@ -775,6 +816,7 @@ function extractImu(pick: Picker): ImuReading | null {
     pitch: pitch ?? 0,
     roll: roll ?? 0,
     yaw: yaw ?? undefined,
+    dieTempC: dieTempC ?? undefined,
     accel: hasAccel
       ? { x: accel.x as number, y: accel.y as number, z: accel.z as number }
       : undefined,
@@ -821,8 +863,16 @@ function extractGps(pick: Picker): GpsReading | null {
     under: SCOPE.gps,
     range: [0, 400],
   });
+  const altitude = pick.number(["altitudem", "altitude", "altm", "alt", "elevation"], {
+    under: SCOPE.gps,
+    range: [-500, 10000],
+  });
 
-  const hasPosition = latitude !== null && longitude !== null;
+  // 0,0 is what a GPS library emits when it has nothing — a position in the
+  // Gulf of Guinea is not a plausible rover location, and showing it would put
+  // a fabricated point on the map. §12.1 rule 7.
+  const nullIsland = latitude === 0 && longitude === 0;
+  const hasPosition = latitude !== null && longitude !== null && !nullIsland;
 
   return {
     latitude: hasPosition ? latitude : undefined,
@@ -830,8 +880,9 @@ function extractGps(pick: Picker): GpsReading | null {
     fix:
       (fix ?? (fixQuality !== null ? fixQuality > 0 : (satellites ?? 0) >= 3)) && hasPosition,
     satellites: satellites ?? undefined,
-    altitudeM: pick.number(["altitude", "altm", "alt", "elevation"], { range: [-500, 10000] }) ??
-      undefined,
+    // Read either way so the key is accounted for, but only reported when
+    // there is a fix behind it.
+    altitudeM: hasPosition ? (altitude ?? undefined) : undefined,
     // NMEA reports ground speed in knots; convert only when the key says so.
     speedKmh: speed
       ? speed.key.includes("knot")

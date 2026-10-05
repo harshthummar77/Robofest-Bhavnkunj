@@ -6,7 +6,13 @@ import {
   useTelemetry,
 } from "../../lib/telemetry-store";
 import { interpretBattery, interpretCpuTemp, worst } from "../../lib/thresholds";
-import type { BatteryReading, DriveReading, HealthLevel, StatusLevel } from "../../lib/types";
+import type {
+  BatteryReading,
+  DriveReading,
+  HealthLevel,
+  ImuReading,
+  StatusLevel,
+} from "../../lib/types";
 import { IconAi, IconBattery, IconSource, IconThermal } from "../icons";
 import { Panel, PanelHeader, TechnicalDetail } from "../ui/panel";
 import { SourceErrorLine, SourceHealthRow } from "../layout/source-health-row";
@@ -43,6 +49,7 @@ export function RoverHealthModule() {
   const drive = useFieldValue<DriveReading>("drive");
   const aiStatus = useFieldValue<string>("aiStatus");
   const cpuTemp = useFieldValue<number>("cpuTemp");
+  const imu = useFieldValue<ImuReading>("imu");
 
   const batteryInterpretation = interpretBattery(battery);
   const cpuInterpretation = interpretCpuTemp(cpuTemp);
@@ -141,6 +148,17 @@ export function RoverHealthModule() {
               value={drive ? `${(drive.speed * 100).toFixed(0)} %` : "not reported"}
             />
             <TechnicalDetail label="Processor temperature" value={cpuInterpretation.exact} />
+            {/*
+              The MPU6050 die temperature. Not the air — it reads the silicon
+              inside the chassis, so it belongs with board health rather than
+              with the environment sensors.
+            */}
+            <TechnicalDetail
+              label="IMU board temperature"
+              value={
+                imu?.dieTempC === undefined ? "not reported" : `${imu.dieTempC.toFixed(1)} °C`
+              }
+            />
             <TechnicalDetail
               label="Nodes reporting"
               value={`${health.filter((entry) => entry.state !== "OFFLINE").length} of ${health.length}`}

@@ -230,7 +230,15 @@ export interface Detection {
 export interface GasReading {
   sensorId: string;
   label: string;
-  /** 0..1 proportion of the ADC's full scale. */
+  /**
+   * 0..1 proportion of the ADC's full scale.
+   *
+   * At 1 the converter is railed: the sensor is reporting at least this much
+   * and the true level cannot be read. That is not downgraded to a lower
+   * status — a saturated gas sensor may well be a real hazard — but it is said
+   * plainly, because an MQ sensor also reads high for several minutes after
+   * power-on while its heater stabilises.
+   */
   raw: number;
   /** The ADC count as reported, when the node sends counts. */
   rawAdc?: number;
@@ -324,6 +332,12 @@ export interface ImuReading {
   yaw?: number;
   accel?: { x: number; y: number; z: number };
   gyro?: { x: number; y: number; z: number };
+  /**
+   * The MPU6050's own die temperature. Not the air temperature — it reads the
+   * silicon, which sits inside the chassis next to whatever else is warm. It
+   * is a board health figure, which is where the dashboard shows it.
+   */
+  dieTempC?: number;
 }
 
 /**

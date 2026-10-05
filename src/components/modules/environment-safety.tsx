@@ -82,6 +82,18 @@ export function EnvironmentSafetyModule() {
                   ? `${gasReadings.length} gas sensor(s) reporting`
                   : "No gas sensor data"}
               </p>
+              {/*
+                MQ sensors run their heater hot and read high until it settles,
+                which is minutes from power-on and longer on a sensor that has
+                not been used in a while. Saying so is the difference between
+                an operator trusting the first reading and knowing to wait.
+              */}
+              {gasReadings?.some((reading) => reading.raw >= 1) ? (
+                <p className="mt-1 text-xs text-warning">
+                  A sensor is at full scale. That may be a real hazard — treat it as one — but an
+                  MQ sensor also reads at the top while its heater warms up after power-on.
+                </p>
+              ) : null}
             </div>
             <StatusBadge level={gasInterpretation.level} />
           </div>
