@@ -190,8 +190,6 @@ const fatal = errors.filter(
 );
 check("no fatal console errors", fatal.length === 0, fatal.join(" | "));
 
-await page.screenshot({ path: `${process.env.SHOT_DIR ?? "."}/chain-reports.png` });
-
 console.log(failures.length === 0 ? "\nDETECTION CHAIN OK" : `\n${failures.length} FAILED`);
 await browser.close();
 if (failures.length > 0) process.exit(1);

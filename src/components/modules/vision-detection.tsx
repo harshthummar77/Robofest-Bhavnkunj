@@ -15,7 +15,6 @@ import {
 import { interpretConfidence } from "../../lib/thresholds";
 import type { Detection, ModuleId, StatusLevel } from "../../lib/types";
 import { useIsMockMode } from "../../lib/data-mode";
-import { cn } from "../../lib/utils";
 import { IconBookmark, IconLocate } from "../icons";
 import { Button } from "../ui/button";
 import { Panel, PanelHeader, TechnicalDetail } from "../ui/panel";
@@ -91,16 +90,9 @@ export function VisionDetectionModule({
         <Panel className="p-3">
           {/* Fixed aspect box: a reconnect must not resize the layout. Rule 10. */}
           <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
+            {/* The feed draws its own detection overlay: a source that already
+                carries boxes must not get a second set. */}
             <CameraFeed detections={detections} stale={stale} />
-
-            {/* AI overlays. Boxes appear, then the ID locks in. §9 */}
-            {detections.map((detection, index) => (
-              <DetectionBox
-                key={`${detection.personId}-${index}`}
-                detection={detection}
-                stale={stale}
-              />
-            ))}
 
             {/* Feed chrome: timestamp and feed state. §4.1 */}
             <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent p-3">
@@ -121,6 +113,21 @@ export function VisionDetectionModule({
               </div>
             </div>
           </div>
+
+          {/*
+            In mock mode the picture and the telemetry are two independent
+            simulations: recorded footage that already carries the detector's
+            own boxes, and a simulated rover meeting simulated people. They
+            will not agree, and someone watching a person walk across a feed
+            that reports nobody deserves to be told why rather than left to
+            conclude the detection is broken.
+          */}
+          {mock ? (
+            <p className="mt-2 px-1 text-[11px] text-faint-foreground">
+              Recorded footage. The boxes in the picture came from the recording; the detections
+              listed beside it come from the simulated rover, so the two are unrelated.
+            </p>
+          ) : null}
 
           <div className="mt-3 flex flex-wrap gap-2">
             <Button variant="surface" onClick={bookmark}>
@@ -252,33 +259,6 @@ export function VisionDetectionModule({
           </p>
         </Panel>
       </div>
-    </div>
-  );
-}
-
-function DetectionBox({ detection, stale }: { detection: Detection; stale: boolean }) {
-  const person = !detection.label || detection.label === "person";
-  return (
-    <div
-      className={cn(
-        "absolute rounded-md border-2 transition-layout",
-        stale ? "border-warning/70" : person ? "border-critical" : "border-attention",
-      )}
-      style={{
-        left: `${detection.box.x * 100}%`,
-        top: `${detection.box.y * 100}%`,
-        width: `${detection.box.w * 100}%`,
-        height: `${detection.box.h * 100}%`,
-      }}
-    >
-      <span
-        className={cn(
-          "absolute -top-6 left-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold text-white",
-          stale ? "bg-warning/90" : person ? "bg-critical" : "bg-attention",
-        )}
-      >
-        {detection.personId}
-      </span>
     </div>
   );
 }

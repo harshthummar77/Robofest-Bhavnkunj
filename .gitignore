@@ -52,6 +52,12 @@ coverage/
 # so a throwaway probe never lands in a commit.
 scripts/_*
 screenshots/
+# Screenshots the check scripts write when SHOT_DIR is not set.
+/chain-reports.png
+/mock-video*.png
+/live-*.png
+/cam-*.png
+/set-*.png
 *.png.tmp
 .puppeteer/
 test-results/

@@ -40,6 +40,15 @@ same ingest path as real traffic, so mock mode tests the routing rather than
 bypassing it. The camera, which has nothing to decode, is drawn as a tunnel
 scene marked **simulated** on the frame.
 
+The mock camera plays recorded rover footage from `public/mock-camera.mp4`
+(720p, no audio, looped). That clip was captured from the Pi Camera 3 with the
+detector running, so it already carries its own boxes — the dashboard therefore
+suppresses its simulated overlay while it plays, rather than drawing a second
+disagreeing set. The picture and the telemetry remain two independent
+simulations and will not agree about who is in frame, which the view says
+plainly instead of leaving it to be discovered. Replace the file to change the
+footage; delete it and the drawn tunnel scene takes over.
+
 **Real data** connects to the node addresses in the registry. A node that does
 not answer reads as offline; nothing is ever substituted for it, and the
 dashboard never silently falls back to simulated data while presenting it as

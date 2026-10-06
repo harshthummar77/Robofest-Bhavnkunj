@@ -141,24 +141,8 @@ export function PilotView({ onExit }: { onExit(): void }) {
       <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[1.6fr_1fr]">
         {/* Camera: the primary surface while driving. */}
         <div className="relative min-h-0 overflow-hidden rounded-card border border-border bg-black">
+          {/* The feed draws its own detection overlay. */}
           <CameraFeed detections={detections} stale={false} />
-
-          {detections.map((detection, index) => (
-            <div
-              key={`${detection.personId}-${index}`}
-              className="absolute rounded-md border-2 border-critical"
-              style={{
-                left: `${detection.box.x * 100}%`,
-                top: `${detection.box.y * 100}%`,
-                width: `${detection.box.w * 100}%`,
-                height: `${detection.box.h * 100}%`,
-              }}
-            >
-              <span className="absolute -top-6 left-0 rounded bg-critical px-1.5 py-0.5 font-mono text-[11px] font-semibold text-white">
-                {detection.personId}
-              </span>
-            </div>
-          ))}
 
           {/*
             Obstacle distance is the single largest number on screen. It is the

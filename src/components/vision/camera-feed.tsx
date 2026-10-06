@@ -4,21 +4,25 @@ import { useIsMockMode } from "../../lib/data-mode";
 import { startWhep, type WhepState } from "../../lib/webrtc/whep";
 import type { Detection } from "../../lib/types";
 import { cn } from "../../lib/utils";
-import { IconAudioOn, IconAudioOff } from "../icons";
 
 /**
- * The RGB surface.
+ * The RGB surface, and the detection overlay that belongs on top of it.
  *
  * In real mode this is whatever the camera node publishes — an MJPEG image
  * stream consumed directly by an <img>, or a WebRTC stream from a WHEP server
  * such as MediaMTX. Either way it is consumed as media, never through the
  * telemetry channel (PROJECT_CONTEXT.md §12).
  *
- * In mock mode there is no camera to read, so rather than show a dead black
- * box the simulated scene is drawn here: a tunnel the rover is advancing
- * through, with a figure wherever the simulated detector reports one. It is
- * drawn, not decoded — and it is marked SIMULATED on the frame itself so it
- * can never be mistaken for a picture of the world.
+ * In mock mode it plays recorded rover footage. That footage was captured from
+ * the Pi Camera 3 with the detector running, so it already carries its own
+ * boxes — drawing the simulated ones over it would put two disagreeing sets of
+ * boxes on one picture, which reads as a bug. The overlay therefore lives here
+ * rather than in each view, so one place decides whether the source draws its
+ * own.
+ *
+ * The frame is marked SIMULATED whenever this is not the rover's live camera,
+ * because recorded footage of a real corridor is exactly the thing that could
+ * be mistaken for a live feed.
  */
 export function CameraFeed({
   detections,
@@ -34,7 +38,7 @@ export function CameraFeed({
   const camera = rgbCamera(nodes.filter((node) => node.enabled));
 
   if (mock) {
-    return <MockCameraScene detections={detections} className={className} />;
+    return <MockCamera detections={detections} className={className} />;
   }
 
   if (!camera) {
@@ -50,20 +54,67 @@ export function CameraFeed({
     );
   }
 
-  if (camera.kind === "whep") {
-    return <WebRtcFeed url={camera.url} stale={stale} className={className} />;
-  }
-
   return (
-    <img
-      src={camera.url}
-      alt="Live RGB feed from the rover camera"
-      className={cn(
-        "h-full w-full object-cover transition-state",
-        stale && "opacity-60 saturate-50",
-        className,
+    <div className={cn("relative h-full w-full bg-black", className)}>
+      {camera.kind === "whep" ? (
+        <WebRtcFeed url={camera.url} stale={stale} />
+      ) : (
+        <img
+          src={camera.url}
+          alt="Live RGB feed from the rover camera"
+          className={cn(
+            "h-full w-full object-cover transition-state",
+            stale && "opacity-60 saturate-50",
+          )}
+        />
       )}
-    />
+      <DetectionOverlay detections={detections} stale={stale} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Detection overlay                                                   */
+/* ------------------------------------------------------------------ */
+
+/** AI overlays. The box appears, then the ID locks in. §9 */
+function DetectionOverlay({
+  detections,
+  stale,
+}: {
+  detections: Detection[];
+  stale: boolean;
+}) {
+  return (
+    <>
+      {detections.map((detection, index) => {
+        const person = !detection.label || detection.label === "person";
+        return (
+          <div
+            key={`${detection.personId}-${index}`}
+            className={cn(
+              "absolute rounded-md border-2 transition-layout",
+              stale ? "border-warning/70" : person ? "border-critical" : "border-attention",
+            )}
+            style={{
+              left: `${detection.box.x * 100}%`,
+              top: `${detection.box.y * 100}%`,
+              width: `${detection.box.w * 100}%`,
+              height: `${detection.box.h * 100}%`,
+            }}
+          >
+            <span
+              className={cn(
+                "absolute -top-6 left-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold text-white",
+                stale ? "bg-warning/90" : person ? "bg-critical" : "bg-attention",
+              )}
+            >
+              {detection.personId}
+            </span>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -74,49 +125,24 @@ export function CameraFeed({
 /** How long to wait before retrying a stream that failed to start. */
 const RETRY_MS = 4000;
 
-function WebRtcFeed({
-  url,
-  stale,
-  className,
-}: {
-  url: string;
-  stale: boolean;
-  className?: string;
-}) {
+function WebRtcFeed({ url, stale }: { url: string; stale: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<WhepState>("connecting");
   const [detail, setDetail] = useState<string | null>(null);
   // Bumped to force a fresh session after a failure.
   const [attempt, setAttempt] = useState(0);
-  // Whether the stream carries a microphone track at all.
-  const [hasAudio, setHasAudio] = useState(false);
-  // Audio starts muted: browsers refuse to autoplay a stream with sound until
-  // the page has been interacted with, and a camera that will not start because
-  // of a blocked audio track is worse than a camera with no sound. The operator
-  // turns it on with the speaker control, which counts as that interaction.
-  const [muted, setMuted] = useState(true);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    setHasAudio(false);
-    const session = startWhep(url, video, {
-      onState(next, why) {
-        setState(next);
-        setDetail(why ?? null);
-      },
-      onAudio: setHasAudio,
+    const session = startWhep(url, video, (next, why) => {
+      setState(next);
+      setDetail(why ?? null);
     });
 
     return () => session.close();
   }, [url, attempt]);
-
-  // Keep the element's muted property in sync with operator intent.
-  useEffect(() => {
-    const video = videoRef.current;
-    if (video) video.muted = muted;
-  }, [muted, hasAudio]);
 
   // A camera that drops out must come back on its own: the pilot has both
   // hands on the transmitter and cannot reload a page. §4.9
@@ -127,12 +153,11 @@ function WebRtcFeed({
   }, [state]);
 
   return (
-    <div className={cn("relative h-full w-full bg-black", className)}>
+    <>
       <video
         ref={videoRef}
-        // Muted at first and playsInline so the browser allows autoplay. The
-        // muted property is then driven by the `muted` state via an effect, so
-        // the operator can turn the rover microphone on with the control below.
+        // Muted and playsInline so the browser allows autoplay; the dashboard
+        // plays no audio.
         muted
         playsInline
         autoPlay
@@ -141,27 +166,6 @@ function WebRtcFeed({
           (stale || state !== "live") && "opacity-60",
         )}
       />
-
-      {/* Microphone control — shown only when the stream actually carries audio
-          (the rover mic muxed into the camera path). On a video-only camera it
-          never appears. */}
-      {state === "live" && hasAudio ? (
-        <button
-          type="button"
-          onClick={() => setMuted((on) => !on)}
-          aria-label={muted ? "Unmute rover microphone" : "Mute rover microphone"}
-          aria-pressed={!muted}
-          title={muted ? "Rover mic muted — click to listen" : "Rover mic live — click to mute"}
-          className="absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-semibold tracking-wide text-white/85 backdrop-blur-sm transition-state hover:bg-black/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-        >
-          {muted ? (
-            <IconAudioOff size={16} weight="fill" />
-          ) : (
-            <IconAudioOn size={16} weight="fill" className="text-normal" />
-          )}
-          {muted ? "MIC OFF" : "MIC LIVE"}
-        </button>
-      ) : null}
 
       {state !== "live" ? (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
@@ -174,12 +178,65 @@ function WebRtcFeed({
           ) : null}
         </div>
       ) : null}
-    </div>
+    </>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Simulated scene                                                     */
+/* Mock camera                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Recorded rover footage, served from `public/`.
+ *
+ * It already carries the detector's own boxes, so the simulated overlay is
+ * suppressed while it plays. The simulated detections still run the rest of
+ * the chain — person records, map markers, alerts, the report — they just are
+ * not drawn a second time on a picture that disagrees with them.
+ */
+const MOCK_VIDEO = "/mock-camera.mp4";
+
+function MockCamera({
+  detections,
+  className,
+}: {
+  detections: Detection[];
+  className?: string;
+}) {
+  // If the footage is missing from a checkout, fall back to the drawn scene
+  // rather than a black rectangle.
+  const [videoFailed, setVideoFailed] = useState(false);
+
+  if (videoFailed) {
+    return <MockCameraScene detections={detections} className={className} />;
+  }
+
+  return (
+    <div className={cn("relative h-full w-full bg-black", className)}>
+      <video
+        src={MOCK_VIDEO}
+        autoPlay
+        loop
+        muted
+        playsInline
+        onError={() => setVideoFailed(true)}
+        className="h-full w-full object-cover"
+      />
+      <SimulatedBadge />
+    </div>
+  );
+}
+
+function SimulatedBadge() {
+  return (
+    <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-semibold tracking-[0.18em] text-warning uppercase">
+      Simulated camera
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Drawn fallback scene                                                */
 /* ------------------------------------------------------------------ */
 
 const WIDTH = 640;
@@ -272,9 +329,9 @@ function MockCameraScene({
   return (
     <div className={cn("relative h-full w-full bg-black", className)}>
       <canvas ref={canvasRef} className="h-full w-full object-cover" />
-      <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-semibold tracking-[0.18em] text-warning uppercase">
-        Simulated camera
-      </span>
+      {/* The drawn scene has no boxes of its own, so the overlay belongs here. */}
+      <DetectionOverlay detections={detections} stale={false} />
+      <SimulatedBadge />
     </div>
   );
 }
