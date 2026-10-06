@@ -4,6 +4,7 @@ import { useIsMockMode } from "../../lib/data-mode";
 import { startWhep, type WhepState } from "../../lib/webrtc/whep";
 import type { Detection } from "../../lib/types";
 import { cn } from "../../lib/utils";
+import { IconAudioOn, IconAudioOff } from "../icons";
 
 /**
  * The RGB surface.
@@ -87,18 +88,35 @@ function WebRtcFeed({
   const [detail, setDetail] = useState<string | null>(null);
   // Bumped to force a fresh session after a failure.
   const [attempt, setAttempt] = useState(0);
+  // Whether the stream carries a microphone track at all.
+  const [hasAudio, setHasAudio] = useState(false);
+  // Audio starts muted: browsers refuse to autoplay a stream with sound until
+  // the page has been interacted with, and a camera that will not start because
+  // of a blocked audio track is worse than a camera with no sound. The operator
+  // turns it on with the speaker control, which counts as that interaction.
+  const [muted, setMuted] = useState(true);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const session = startWhep(url, video, (next, why) => {
-      setState(next);
-      setDetail(why ?? null);
+    setHasAudio(false);
+    const session = startWhep(url, video, {
+      onState(next, why) {
+        setState(next);
+        setDetail(why ?? null);
+      },
+      onAudio: setHasAudio,
     });
 
     return () => session.close();
   }, [url, attempt]);
+
+  // Keep the element's muted property in sync with operator intent.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) video.muted = muted;
+  }, [muted, hasAudio]);
 
   // A camera that drops out must come back on its own: the pilot has both
   // hands on the transmitter and cannot reload a page. §4.9
@@ -112,8 +130,9 @@ function WebRtcFeed({
     <div className={cn("relative h-full w-full bg-black", className)}>
       <video
         ref={videoRef}
-        // Muted and playsInline so the browser allows autoplay; the dashboard
-        // plays no audio.
+        // Muted at first and playsInline so the browser allows autoplay. The
+        // muted property is then driven by the `muted` state via an effect, so
+        // the operator can turn the rover microphone on with the control below.
         muted
         playsInline
         autoPlay
@@ -122,6 +141,27 @@ function WebRtcFeed({
           (stale || state !== "live") && "opacity-60",
         )}
       />
+
+      {/* Microphone control — shown only when the stream actually carries audio
+          (the rover mic muxed into the camera path). On a video-only camera it
+          never appears. */}
+      {state === "live" && hasAudio ? (
+        <button
+          type="button"
+          onClick={() => setMuted((on) => !on)}
+          aria-label={muted ? "Unmute rover microphone" : "Mute rover microphone"}
+          aria-pressed={!muted}
+          title={muted ? "Rover mic muted — click to listen" : "Rover mic live — click to mute"}
+          className="absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-semibold tracking-wide text-white/85 backdrop-blur-sm transition-state hover:bg-black/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        >
+          {muted ? (
+            <IconAudioOff size={16} weight="fill" />
+          ) : (
+            <IconAudioOn size={16} weight="fill" className="text-normal" />
+          )}
+          {muted ? "MIC OFF" : "MIC LIVE"}
+        </button>
+      ) : null}
 
       {state !== "live" ? (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">

@@ -53,6 +53,8 @@ export {
   Broadcast as IconLive,
   NavigationArrow as IconGps,
   Radio as IconRadio,
+  SpeakerHigh as IconAudioOn,
+  SpeakerSlash as IconAudioOff,
 } from "@phosphor-icons/react";
 
 export type { Icon as IconComponent } from "@phosphor-icons/react";

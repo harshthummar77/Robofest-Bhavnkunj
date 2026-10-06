@@ -13,13 +13,28 @@
  * a second.
  *
  * This is a receive-only session: the dashboard never opens a camera or a
- * microphone, it only accepts video.
+ * microphone of its own, it only accepts media the rover sends. When the rover
+ * path carries audio as well as video (the Raspberry Pi microphone muxed into
+ * the same MediaMTX path — see the rover A/V setup), that audio arrives on the
+ * same peer connection and plays through the same <video> element. The track is
+ * still only ever inbound; nothing is captured from the operator's machine.
  */
 
 export type WhepState = "connecting" | "live" | "failed";
 
 export interface WhepSession {
   close(): void;
+}
+
+export interface WhepCallbacks {
+  onState(state: WhepState, detail?: string): void;
+  /**
+   * Called once the remote media stream is attached, reporting whether it
+   * carries an audio track. Lets the view show an unmute control only when
+   * there is actually sound to hear, rather than a dead button on a
+   * video-only camera.
+   */
+  onAudio?(present: boolean): void;
 }
 
 /** How long to wait for ICE candidates before sending the offer. */
@@ -52,8 +67,13 @@ async function gatherComplete(connection: RTCPeerConnection): Promise<void> {
 export function startWhep(
   url: string,
   video: HTMLVideoElement,
-  onState: (state: WhepState, detail?: string) => void,
+  callbacks: WhepCallbacks | ((state: WhepState, detail?: string) => void),
 ): WhepSession {
+  // Accept either the full callbacks object or a bare state callback, so the
+  // older two-argument call site keeps working.
+  const onState = typeof callbacks === "function" ? callbacks : callbacks.onState;
+  const onAudio = typeof callbacks === "function" ? undefined : callbacks.onAudio;
+
   let closed = false;
 
   const connection = new RTCPeerConnection({
@@ -64,10 +84,16 @@ export function startWhep(
   });
 
   connection.addTransceiver("video", { direction: "recvonly" });
+  // Also offer to receive audio. If the rover path is video-only the server
+  // simply leaves this track inactive in its answer, so offering it always is
+  // harmless and means no reconnect is needed when a mic appears.
+  connection.addTransceiver("audio", { direction: "recvonly" });
 
   connection.ontrack = (event) => {
     if (closed) return;
-    video.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+    const stream = event.streams[0] ?? new MediaStream([event.track]);
+    video.srcObject = stream;
+    onAudio?.(stream.getAudioTracks().length > 0);
     void video.play().catch(() => {
       // Autoplay can be refused until the page has been interacted with. The
       // element is muted, which browsers allow, so this is rare — report it
