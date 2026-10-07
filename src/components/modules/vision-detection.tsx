@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import toast from "react-hot-toast";
 import { MODULE_BY_ID } from "../../config/modules";
 import { rgbCamera, useNodes } from "../../config/nodes";
@@ -20,7 +21,7 @@ import { Button } from "../ui/button";
 import { Panel, PanelHeader, TechnicalDetail } from "../ui/panel";
 import { StatusBadge } from "../layout/status-badge";
 import { SourceUnavailable } from "../layout/unavailable";
-import { CameraFeed } from "../vision/camera-feed";
+import { CameraFeed, type CameraStatus } from "../vision/camera-feed";
 
 /**
  * Vision & Detection. §4.1
@@ -51,11 +52,37 @@ export function VisionDetectionModule({
   const fps = useFieldValue<number>("cameraFps");
   const aiStatus = useFieldValue<string>("aiStatus");
   const persons = usePersonList();
+  // Measured from the decoded stream rather than reported by the rover. The
+  // node publishes no frame rate, and an empty row says nothing about whether
+  // the picture is healthy — these numbers do, as long as the view is clear
+  // about where they came from.
+  const [streamStatus, setStreamStatus] = useState<CameraStatus | null>(null);
+  const onStatus = useCallback((status: CameraStatus | null) => setStreamStatus(status), []);
   const addEvent = useTelemetry((state) => state.addEvent);
 
   const detections =
     detectionsResolution.status === "unavailable" ? [] : detectionsResolution.reading.value;
   const stale = detectionsResolution.status === "stale";
+
+  // The node's own figure wins when it reports one: it knows the capture rate,
+  // while the browser only knows what survived the network.
+  const stats = streamStatus?.stats ?? null;
+  const measuredFps = stats && stats.fps !== null && stats.fps > 0 ? stats.fps : null;
+  const shownFps = fps ?? measuredFps;
+  // Whether a node is reporting detections at all. When none is, every row and
+  // panel that exists to describe detections is removed rather than filled
+  // with dashes: an empty box reads as a fault in the box.
+  const hasDetectionSource = detectionsResolution.status !== "unavailable";
+  // An MJPEG camera reports nothing about itself: the <img> either paints or
+  // it does not, so there is no session state to show.
+  const streamWord =
+    streamStatus === null
+      ? "—"
+      : streamStatus.state === "live"
+        ? "live"
+        : streamStatus.state === "connecting"
+          ? "connecting"
+          : "unavailable";
 
   function bookmark() {
     addEvent({
@@ -80,9 +107,7 @@ export function VisionDetectionModule({
     );
   }
 
-  const people = detections.filter(
-    (detection) => !detection.label || detection.label === "person",
-  );
+  const people = detections.filter((detection) => !detection.label || detection.label === "person");
 
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_22rem]">
@@ -92,17 +117,19 @@ export function VisionDetectionModule({
           <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
             {/* The feed draws its own detection overlay: a source that already
                 carries boxes must not get a second set. */}
-            <CameraFeed detections={detections} stale={stale} />
+            <CameraFeed detections={detections} stale={stale} onStatus={onStatus} />
 
             {/* Feed chrome: timestamp and feed state. §4.1 */}
-            <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent p-3">
+            {/* Chrome only: it covers the whole top edge, so it must never take
+                a click meant for a control underneath it. */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-2 bg-gradient-to-b from-black/70 to-transparent p-3">
               <span className="tabular font-mono text-[11px] text-white/90">
                 {formatTime(missionNow())}
               </span>
               <div className="flex items-center gap-2">
-                {fps !== null ? (
+                {shownFps !== null ? (
                   <span className="tabular rounded-full bg-black/55 px-2 py-0.5 font-mono text-[11px] text-white/80">
-                    {fps.toFixed(0)} fps
+                    {shownFps.toFixed(0)} fps
                   </span>
                 ) : null}
                 <StatusBadge
@@ -152,16 +179,18 @@ export function VisionDetectionModule({
           <PanelHeader
             title="Detections"
             hint={
-              people.length === 0
-                ? "No people currently in frame."
-                : `${people.length} in frame now`
+              !hasDetectionSource
+                ? "No detection source connected."
+                : people.length === 0
+                  ? "No people currently in frame."
+                  : `${people.length} in frame now`
             }
           />
 
           <div className="space-y-2">
             {people.length === 0 ? (
               <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                {available
+                {hasDetectionSource
                   ? "Nothing detected in the current frame."
                   : "No node is reporting detections — the camera is shown without AI overlays."}
               </p>
@@ -240,18 +269,45 @@ export function VisionDetectionModule({
 
         <Panel>
           <PanelHeader title="Feed detail" hint="Pi Camera 3 + AI HAT+" />
-          <TechnicalDetail
-            label="AI inference"
-            value={aiStatus === null ? "not reported" : aiStatus.toLowerCase()}
-          />
+
+          {/*
+            The same rows in both data modes. Mock mode is what an operator
+            rehearses on, so it must not be a different screen from the one
+            they will drive with — only the picture behind it changes.
+
+            Every value is observed: reported by a node, or measured here off
+            the video element that is actually playing. Rows the browser can
+            only know for a WebRTC session — bitrate, packet loss — are left to
+            Rover health rather than shown empty half the time.
+          */}
+          <TechnicalDetail label="Stream" value={streamWord} />
           <TechnicalDetail
             label="Frame rate"
-            value={fps === null ? "not reported" : `${fps.toFixed(0)} fps`}
+            value={
+              fps !== null
+                ? `${fps.toFixed(0)} fps`
+                : measuredFps !== null
+                  ? `${measuredFps.toFixed(0)} fps · measured here`
+                  : "—"
+            }
+          />
+          <TechnicalDetail
+            label="Resolution"
+            value={
+              stats && stats.width !== null && stats.height !== null
+                ? `${stats.width} x ${stats.height}`
+                : "—"
+            }
+          />
+          <TechnicalDetail
+            label="AI inference"
+            value={aiStatus !== null ? aiStatus.toLowerCase() : "no AI node"}
           />
           <TechnicalDetail
             label="Objects in frame"
-            value={String(detections.length)}
+            value={hasDetectionSource ? String(detections.length) : "no AI node"}
           />
+
           <p className="mt-3 text-[11px] text-faint-foreground">
             Person IDs come from the node when it tracks, and are assigned here by frame-to-frame
             proximity when it does not. A person who leaves and returns may be given a new ID —

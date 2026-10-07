@@ -26,6 +26,24 @@ export interface WhepSession {
   close(): void;
 }
 
+/**
+ * What the browser can measure about the stream it is actually decoding.
+ *
+ * The rover node reports a frame rate only if someone wrote code to publish
+ * one, and this one does not. These numbers are a different thing and are
+ * labelled as such in the view: not what the camera claims, but what arrived
+ * and was decoded here in the last second.
+ */
+export interface WhepStats {
+  fps: number | null;
+  width: number | null;
+  height: number | null;
+  /** Video bitrate over the last sample, in kilobits per second. */
+  kbps: number | null;
+  /** Packets the receiver never got. On a rover this is the RF link talking. */
+  packetsLost: number | null;
+}
+
 export interface WhepCallbacks {
   onState(state: WhepState, detail?: string): void;
   /**
@@ -35,7 +53,12 @@ export interface WhepCallbacks {
    * video-only camera.
    */
   onAudio?(present: boolean): void;
+  /** Called about once a second while the stream is up. */
+  onStats?(stats: WhepStats): void;
 }
+
+/** How often to sample decoder statistics. */
+const STATS_INTERVAL_MS = 1000;
 
 /** How long to wait for ICE candidates before sending the offer. */
 const GATHER_TIMEOUT_MS = 1500;
@@ -73,6 +96,7 @@ export function startWhep(
   // older two-argument call site keeps working.
   const onState = typeof callbacks === "function" ? callbacks : callbacks.onState;
   const onAudio = typeof callbacks === "function" ? undefined : callbacks.onAudio;
+  const onStats = typeof callbacks === "function" ? undefined : callbacks.onStats;
 
   let closed = false;
 
@@ -101,6 +125,54 @@ export function startWhep(
       onState("failed", "the browser blocked playback");
     });
   };
+
+  // Decoder statistics, sampled from the peer connection itself. `getStats`
+  // reports the inbound video track's current decode rate and frame size, so
+  // this measures the picture on screen rather than trusting a claim about it.
+  let lastBytes: { bytes: number; at: number } | null = null;
+
+  const statsTimer = onStats
+    ? setInterval(() => {
+        if (closed) return;
+        void connection
+          .getStats()
+          .then((report) => {
+            if (closed) return;
+            let video: Record<string, unknown> | null = null;
+            report.forEach((entry) => {
+              if (entry.type !== "inbound-rtp") return;
+              if (entry.kind !== "video" && entry.mediaType !== "video") return;
+              video = entry as Record<string, unknown>;
+            });
+            if (!video) return;
+            const track = video as Record<string, unknown>;
+
+            // Bitrate is a delta, so it needs the previous sample. The first
+            // tick therefore reports no rate rather than a made-up one.
+            let kbps: number | null = null;
+            const bytes = typeof track.bytesReceived === "number" ? track.bytesReceived : null;
+            const at = typeof track.timestamp === "number" ? track.timestamp : Date.now();
+            if (bytes !== null) {
+              if (lastBytes && at > lastBytes.at) {
+                kbps = ((bytes - lastBytes.bytes) * 8) / (at - lastBytes.at);
+              }
+              lastBytes = { bytes, at };
+            }
+
+            onStats({
+              fps: typeof track.framesPerSecond === "number" ? track.framesPerSecond : null,
+              width: typeof track.frameWidth === "number" ? track.frameWidth : null,
+              height: typeof track.frameHeight === "number" ? track.frameHeight : null,
+              kbps,
+              packetsLost: typeof track.packetsLost === "number" ? track.packetsLost : null,
+            });
+          })
+          .catch(() => {
+            // Statistics are decoration; a failure here must not disturb the
+            // picture or the state machine.
+          });
+      }, STATS_INTERVAL_MS)
+    : null;
 
   connection.onconnectionstatechange = () => {
     if (closed) return;
@@ -140,6 +212,7 @@ export function startWhep(
   return {
     close() {
       closed = true;
+      if (statsTimer !== null) clearInterval(statsTimer);
       video.srcObject = null;
       // Closing the peer connection is what ends the session: the server sees
       // the connection drop and reaps its reader immediately.

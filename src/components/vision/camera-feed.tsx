@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { rgbCamera, useNodes } from "../../config/nodes";
+import { IconAudioOff, IconAudioOn } from "../icons";
 import { useIsMockMode } from "../../lib/data-mode";
-import { startWhep, type WhepState } from "../../lib/webrtc/whep";
+import { startWhep, type WhepState, type WhepStats } from "../../lib/webrtc/whep";
 import type { Detection } from "../../lib/types";
 import { cn } from "../../lib/utils";
 
@@ -24,21 +25,45 @@ import { cn } from "../../lib/utils";
  * because recorded footage of a real corridor is exactly the thing that could
  * be mistaken for a live feed.
  */
+/**
+ * What the dashboard knows about the stream first-hand.
+ *
+ * Everything here is observed in the browser — the session state, whether a
+ * microphone track arrived, and the decoder's own numbers. None of it comes
+ * from rover telemetry, so a view may show it even when no node is reporting
+ * anything.
+ */
+export interface CameraStatus {
+  state: WhepState;
+  audio: boolean;
+  stats: WhepStats | null;
+}
+
 export function CameraFeed({
   detections,
   stale,
   className,
+  onStatus,
 }: {
   detections: Detection[];
   stale: boolean;
   className?: string;
+  /**
+   * Observed here, in the browser, about once a second — never reported by the
+   * rover. A view that shows these numbers has to say so. `null` means there is
+   * no stream of this kind to observe.
+   */
+  onStatus?(status: CameraStatus | null): void;
 }) {
   const mock = useIsMockMode();
   const nodes = useNodes();
   const camera = rgbCamera(nodes.filter((node) => node.enabled));
 
   if (mock) {
-    return <MockCamera detections={detections} className={className} />;
+    // Mock mode is a rehearsal of the real thing, so it reports the same
+    // status and carries the same controls: the two modes must not differ in
+    // what the operator sees, only in where the picture came from.
+    return <MockCamera detections={detections} className={className} onStatus={onStatus} />;
   }
 
   if (!camera) {
@@ -57,7 +82,7 @@ export function CameraFeed({
   return (
     <div className={cn("relative h-full w-full bg-black", className)}>
       {camera.kind === "whep" ? (
-        <WebRtcFeed url={camera.url} stale={stale} />
+        <WebRtcFeed url={camera.url} stale={stale} onStatus={onStatus} />
       ) : (
         <img
           src={camera.url}
@@ -78,13 +103,7 @@ export function CameraFeed({
 /* ------------------------------------------------------------------ */
 
 /** AI overlays. The box appears, then the ID locks in. §9 */
-function DetectionOverlay({
-  detections,
-  stale,
-}: {
-  detections: Detection[];
-  stale: boolean;
-}) {
+function DetectionOverlay({ detections, stale }: { detections: Detection[]; stale: boolean }) {
   return (
     <>
       {detections.map((detection, index) => {
@@ -125,24 +144,73 @@ function DetectionOverlay({
 /** How long to wait before retrying a stream that failed to start. */
 const RETRY_MS = 4000;
 
-function WebRtcFeed({ url, stale }: { url: string; stale: boolean }) {
+/** How often playback is sampled — the same cadence in both modes. */
+const STATS_INTERVAL_MS = 1000;
+
+function WebRtcFeed({
+  url,
+  stale,
+  onStatus,
+}: {
+  url: string;
+  stale: boolean;
+  onStatus?(status: CameraStatus | null): void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<WhepState>("connecting");
   const [detail, setDetail] = useState<string | null>(null);
   // Bumped to force a fresh session after a failure.
   const [attempt, setAttempt] = useState(0);
+  // Whether the rover path actually carries sound. No control is shown until
+  // it does, so the operator is never offered a button that does nothing.
+  const [hasAudio, setHasAudio] = useState(false);
+  // Starts muted: browsers only autoplay muted media, and sound arriving
+  // unasked in a control room is its own kind of fault.
+  const [muted, setMuted] = useState(true);
+  const [stats, setStats] = useState<WhepStats | null>(null);
+
+  // Held in a ref: the session is torn down and rebuilt by the effect below,
+  // and a parent that passes an inline callback must not cause a reconnect.
+  const statusRef = useRef(onStatus);
+  useEffect(() => {
+    statusRef.current = onStatus;
+  }, [onStatus]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const session = startWhep(url, video, (next, why) => {
-      setState(next);
-      setDetail(why ?? null);
+    setHasAudio(false);
+    setStats(null);
+
+    const session = startWhep(url, video, {
+      onState(next, why) {
+        setState(next);
+        setDetail(why ?? null);
+      },
+      onAudio: setHasAudio,
+      onStats: setStats,
     });
 
-    return () => session.close();
+    return () => {
+      session.close();
+      // The numbers belonged to that session; leaving them on screen would
+      // turn a dead stream into a plausible-looking live one.
+      statusRef.current?.(null);
+    };
   }, [url, attempt]);
+
+  // One report upward whenever anything observed changes.
+  useEffect(() => {
+    statusRef.current?.({ state, audio: hasAudio, stats });
+  }, [state, hasAudio, stats]);
+
+  // The element is the source of truth for mute, and it is replaced on every
+  // reconnect, so the choice is reapplied rather than set once on click.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) video.muted = muted;
+  }, [muted, state, hasAudio]);
 
   // A camera that drops out must come back on its own: the pilot has both
   // hands on the transmitter and cannot reload a page. §4.9
@@ -156,8 +224,8 @@ function WebRtcFeed({ url, stale }: { url: string; stale: boolean }) {
     <>
       <video
         ref={videoRef}
-        // Muted and playsInline so the browser allows autoplay; the dashboard
-        // plays no audio.
+        // Muted and playsInline so the browser allows autoplay. The operator
+        // can unmute once the stream is up, if it carries a microphone.
         muted
         playsInline
         autoPlay
@@ -166,6 +234,19 @@ function WebRtcFeed({ url, stale }: { url: string; stale: boolean }) {
           (stale || state !== "live") && "opacity-60",
         )}
       />
+
+      {hasAudio && state === "live" ? (
+        <AudioToggle
+          muted={muted}
+          onToggle={() => {
+            const video = videoRef.current;
+            setMuted((wasMuted) => !wasMuted);
+            // Unmuting counts as the user gesture a blocked stream was waiting
+            // for, so nudge playback rather than leaving a stalled picture.
+            if (video) void video.play().catch(() => undefined);
+          }}
+        />
+      ) : null}
 
       {state !== "live" ? (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
@@ -179,6 +260,29 @@ function WebRtcFeed({ url, stale }: { url: string; stale: boolean }) {
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Mute control for a camera path that carries the rover microphone.
+ *
+ * It states the current condition rather than the action, because silence and
+ * a silent feed look identical: the operator has to be able to tell whether
+ * there is nothing to hear or nothing being played.
+ */
+function AudioToggle({ muted, onToggle }: { muted: boolean; onToggle(): void }) {
+  const Icon = muted ? IconAudioOff : IconAudioOn;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={!muted}
+      aria-label={muted ? "Unmute the camera audio" : "Mute the camera audio"}
+      className="absolute right-3 bottom-3 z-20 inline-flex items-center gap-2 rounded-xl bg-black/65 px-3 py-2 text-[11px] font-semibold tracking-[0.12em] text-white/85 uppercase backdrop-blur transition-state outline-none hover:bg-black/80 hover:text-white focus-visible:ring-2 focus-visible:ring-primary/60"
+    >
+      <Icon size={16} weight="bold" />
+      {muted ? "Muted" : "Audio on"}
+    </button>
   );
 }
 
@@ -199,13 +303,67 @@ const MOCK_VIDEO = "/mock-camera.mp4";
 function MockCamera({
   detections,
   className,
+  onStatus,
 }: {
   detections: Detection[];
   className?: string;
+  onStatus?(status: CameraStatus | null): void;
 }) {
   // If the footage is missing from a checkout, fall back to the drawn scene
   // rather than a black rectangle.
   const [videoFailed, setVideoFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [muted, setMuted] = useState(true);
+  const [stats, setStats] = useState<WhepStats | null>(null);
+
+  const statusRef = useRef(onStatus);
+  useEffect(() => {
+    statusRef.current = onStatus;
+  }, [onStatus]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) video.muted = muted;
+  }, [muted, videoFailed]);
+
+  // The same numbers the live feed reports, read off the element that is
+  // actually playing: decoded frames per second and the frame size. They are
+  // measurements of this picture rather than invented figures — the picture
+  // just happens to be a recording, which the badge says plainly.
+  useEffect(() => {
+    if (videoFailed) {
+      setStats(null);
+      return;
+    }
+    let previous: { frames: number; at: number } | null = null;
+    const timer = setInterval(() => {
+      const video = videoRef.current;
+      if (!video) return;
+      const quality = video.getVideoPlaybackQuality?.();
+      const now = performance.now();
+      let fps: number | null = null;
+      if (quality) {
+        if (previous && now > previous.at) {
+          fps = ((quality.totalVideoFrames - previous.frames) * 1000) / (now - previous.at);
+        }
+        previous = { frames: quality.totalVideoFrames, at: now };
+      }
+      setStats({
+        fps,
+        width: video.videoWidth || null,
+        height: video.videoHeight || null,
+        kbps: null,
+        packetsLost: null,
+      });
+    }, STATS_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [videoFailed]);
+
+  useEffect(() => {
+    statusRef.current?.({ state: "live", audio: true, stats });
+  }, [stats]);
+
+  useEffect(() => () => statusRef.current?.(null), []);
 
   if (videoFailed) {
     return <MockCameraScene detections={detections} className={className} />;
@@ -214,6 +372,7 @@ function MockCamera({
   return (
     <div className={cn("relative h-full w-full bg-black", className)}>
       <video
+        ref={videoRef}
         src={MOCK_VIDEO}
         autoPlay
         loop
@@ -221,6 +380,15 @@ function MockCamera({
         playsInline
         onError={() => setVideoFailed(true)}
         className="h-full w-full object-cover"
+      />
+      {/* Same control, same place as on the live feed. */}
+      <AudioToggle
+        muted={muted}
+        onToggle={() => {
+          const video = videoRef.current;
+          setMuted((wasMuted) => !wasMuted);
+          if (video) void video.play().catch(() => undefined);
+        }}
       />
       <SimulatedBadge />
     </div>
